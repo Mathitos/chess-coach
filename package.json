@@ -7,8 +7,9 @@
   "scripts": {
     "build": "bash build.sh",
     "serve": "python3 -m http.server 8765 -d dist",
-    "test": "bash build.sh && node test/review-node.mjs test/game.pgn 12",
-    "test:maia": "bash build.sh && node test/maia-node.mjs"
+    "test": "bash build.sh && node --test test/unit.test.mjs",
+    "test:e2e": "bash build.sh && node --test test/e2e.test.mjs",
+    "review": "bash build.sh && node test/review-cli.mjs"
   },
   "license": "GPL-3.0-or-later",
   "dependencies": {
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
-    "onnxruntime-node": "1.23"
+    "onnxruntime-node": "1.23",
+    "playwright": "^1.65.1"
   }
 }

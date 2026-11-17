@@ -39,17 +39,20 @@ npm run build      # gera dist/
 npm run serve      # http://localhost:8765
 ```
 
-`dist/` é um site estático: dá pra hospedar em GitHub Pages, Netlify, Cloudflare Pages etc. Este repo publica no GitHub Pages a cada push na `main` (`.github/workflows/pages.yml`). O Stockfish e o Maia rodam em Web Workers; não precisa de `SharedArrayBuffer`/COOP/COEP.
+`dist/` é um site estático: dá pra hospedar em GitHub Pages, Netlify, Cloudflare Pages etc. Este repo publica no GitHub Pages a cada push na `main` com os testes passando (`.github/workflows/ci.yml`). O Stockfish e o Maia rodam em Web Workers; não precisa de `SharedArrayBuffer`/COOP/COEP.
 
 O modelo do Maia (`assets/maia3_simplified.onnx`, 45 MB) é dividido em 3 partes no build e baixado pelo navegador na primeira análise.
 
 ### Testes
 
 ```bash
-npm test                         # review completo de test/game.pgn em Node (Stockfish + Maia)
-npm run test:maia                # sanity do Maia em Node
-pip install playwright && python3 test/e2e2.py   # end-to-end no Chrome (CHROME_PATH opcional)
+npm test                           # unitários: entrada/relógio, Stockfish + classificação, Maia (Node)
+npx playwright install chromium    # uma vez
+npm run test:e2e                   # end-to-end no Chromium (CHROME_PATH=/caminho/do/chrome pra usar um Chrome local)
+npm run review -- test/game.pgn 14 # imprime o review de uma partida no terminal
 ```
+
+O GitHub Actions (`.github/workflows/ci.yml`) roda os dois em todo push e pull request, e só publica no GitHub Pages se passarem.
 
 ## Estrutura
 
@@ -62,7 +65,7 @@ src/
   maia-worker.js  worker com onnxruntime-web
   template.html   HTML/CSS (o JS é embutido no build)
 assets/           modelo do Maia, índice de lances, peças
-test/             partidas de exemplo e testes
+test/             partidas de exemplo, testes unitários (node:test) e end-to-end (Playwright)
 ```
 
 ## Créditos e licenças
