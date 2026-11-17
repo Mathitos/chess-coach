@@ -21,8 +21,6 @@ header .grow{flex:1}
 .btn.primary:active{transform:translateY(2px);box-shadow:0 2px 0 #45753c}
 main{max-width:1240px;margin:0 auto;padding:20px}
 /* setup */
-#setup .card{background:var(--panel);border-radius:10px;padding:22px;max-width:780px;margin:20px auto}
-#setup h2{margin:0 0 6px}
 #setup p.lead{color:var(--muted);margin:0 0 16px}
 textarea#pgn{width:100%;min-height:220px;background:#1f1d1b;border:1px solid #4a4744;border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;resize:vertical}
 .opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:14px 0}
@@ -146,28 +144,73 @@ p.say.step{min-height:48px;background:#2b2926;border-radius:8px;padding:10px 12p
 .who{font-weight:600}.sm{font-size:12px}
 .pill{background:#81b64c;color:#fff;border-radius:10px;padding:0 7px;font-size:12px;margin-left:4px}.pill.muted{background:#4a4744;color:#ddd}
 body.training #graph,body.training #moves,body.training #summary,body.training .status,body.training #guide,body.training #analyzing,body.training #players,body.training .toggles,body.training .navbar{display:none!important}
+/* home */
+#setup[hidden]{display:none}
+#setup{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;max-width:1180px;margin:0 auto}
+#setup .card{background:var(--panel);border-radius:14px;padding:28px;margin:0}
+#revCard{flex:3 1 560px;min-width:0}
+#chal{flex:2 1 380px;min-width:0;display:flex;flex-direction:column;gap:14px}
+#setup h2{margin:0 0 6px;font-size:24px;font-weight:800}
+#chal h2{margin:0;font-size:22px}
+.opts2{display:flex;flex-wrap:wrap;gap:20px;align-items:center;margin:14px 0 6px;font-size:14px;color:#cfcbc6}
+.opts2 label{display:flex;align-items:center;gap:8px}
+.opts2 select{background:#1f1d1b;border:1px solid #4a4744;border-radius:8px;padding:7px 10px}
+.opts2 input[type=checkbox]{width:18px;height:18px;accent-color:var(--green)}
+details.more{margin:4px 0 14px;font-size:13.5px}details.more summary{color:var(--muted)}
+details.more .opts{margin:10px 0 0}
+#home{cursor:pointer}
+body[data-view=setup] #trainBtn,body[data-view=setup] #newGame{display:none}
+.ch-head{display:flex;align-items:center;gap:10px}
+.ch-p{margin:0;color:#cfcbc6;line-height:1.5}
+.ch-note{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.ch-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.ch-stats div{background:var(--bg);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:4px}
+.ch-stats b{font-size:28px;font-weight:800}.ch-stats b.hi{color:#9cc76a}.ch-stats span{font-size:13px;color:var(--muted)}
+.btn.big{height:52px;border-radius:10px;font-size:17px;font-weight:800}
+.btn.green{background:var(--green);color:#14200a;box-shadow:0 4px 0 #4f7a2a}
+.ch-warn{background:#3a3226;border:1px solid #6b5426;border-left:4px solid #f0b43c;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.ch-warn p{margin:0;line-height:1.45}.ch-warn .t{font-weight:700;color:#f6d38a}
+.ch-list{list-style:none;margin:0;padding:0}
+.ch-list li{display:flex;align-items:center;gap:12px;padding:11px 4px;border-top:1px solid #45423f;cursor:pointer;border-radius:4px}
+.ch-list li:hover{background:var(--panel2)}
+.ch-list .ty{font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap}
+.ty.erro{background:#4a2622;color:#ffb4a8}.ty.chance{background:#25344a;color:#a8c8f0}
+.ch-list .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.ch-list .mid b{font-weight:600}
+.ch-list .mid span,.ch-list .when{font-size:13px;color:var(--muted);white-space:nowrap}
+.ch-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:24px 8px}
+.ch-empty p{margin:0}.ch-empty .t{font-weight:700;font-size:17px}
+.linkbtn{background:none;border:0;color:#9cc76a;font-weight:600;cursor:pointer;padding:4px 0;text-align:left}.linkbtn:hover{color:#c3e29c}
+.av{width:34px;height:34px;border-radius:50%;background:#4a6b2c;color:#fff;display:grid;place-items:center;font-weight:700;flex:none}
+.acct-txt{display:flex;flex-direction:column;line-height:1.2}.acct-txt span{font-size:12px;color:var(--muted)}
+.btn.outline{background:transparent;border:1px solid #5a5652}
+.btn.gbtn{display:inline-flex;align-items:center;gap:8px;background:#fff;color:#1f1f1f}
 @media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
 </style>
 </head>
 <body>
-<header><h1>♞ Coach de <span>Xadrez</span></h1><div class="grow"></div><span id="acct"></span><button class="btn" id="trainBtn">🎯 Treinar</button><button class="btn" id="newGame">Nova partida</button></header>
+<header><h1 id="home" title="Início">♞ Coach de <span>Xadrez</span></h1><div class="grow"></div><button class="btn" id="trainBtn">🎯 Treinar</button><button class="btn" id="newGame">⌂ Início</button><span id="acct"></span></header>
 <main>
 <section id="setup">
-  <div class="card">
-    <h2>Cola a partida</h2>
-    <p class="lead">Aceita o que o chess.com e o Lichess compartilham: <b>PGN</b> (com ou sem tempo, uma ou várias partidas), <b>link da partida</b> ou <b>FEN</b> (abre a posição pra explorar).</p>
+  <div class="card" id="revCard">
+    <h2>Revisar uma partida</h2>
+    <p class="lead">Cola o que o chess.com ou o Lichess compartilham: <b>PGN</b> (com ou sem tempo, uma ou várias partidas), <b>link da partida</b> ou <b>FEN</b> (abre a posição pra explorar).</p>
     <textarea id="pgn" placeholder="[Event &quot;Live Chess&quot;]&#10;...&#10;1. e4 e5 2. Nf3 ...&#10;&#10;ou https://www.chess.com/game/live/123456789&#10;ou um FEN"></textarea>
     <div id="detect"></div>
-    <div class="opts">
-      <label>Seu usuário no chess.com/Lichess<input type="text" id="user" placeholder="ex: matheus_anzzulin"></label>
-      <label>Profundidade<select id="depth"><option value="deep">Profunda (prof. 20)</option><option value="normal">Normal (prof. 16)</option><option value="fast">Rápida (prof. 12)</option></select></label>
-      <label>Nível do Maia<select id="maiaLevel"><option value="auto">Rating da partida</option><option>600</option><option>800</option><option>1000</option><option>1200</option><option>1400</option><option>1600</option><option>1800</option><option>2000</option><option>2200</option><option>2400</option><option>2600</option></select></label>
-      <label class="chk"><input type="checkbox" id="useMaia" checked> Usar Maia (lance humano)</label>
+    <div class="opts2">
+      <label>Profundidade <select id="depth"><option value="deep">Profunda (padrão)</option><option value="normal">Normal</option><option value="fast">Rápida</option></select></label>
+      <label class="chk"><input type="checkbox" id="useMaia" checked> Comparar com jogadores humanos (Maia)</label>
     </div>
+    <details class="more"><summary>Mais opções</summary>
+      <div class="opts">
+        <label>Seu usuário no chess.com/Lichess<input type="text" id="user" placeholder="ex: matheus_anzzulin"></label>
+        <label>Nível do Maia<select id="maiaLevel"><option value="auto">Rating da partida</option><option>600</option><option>800</option><option>1000</option><option>1200</option><option>1400</option><option>1600</option><option>1800</option><option>2000</option><option>2200</option><option>2400</option><option>2600</option></select></label>
+      </div>
+    </details>
     <div class="actions"><button class="btn primary" id="go">Revisar partida</button><button class="btn" id="sample">Usar exemplo</button></div>
     <div id="err"></div>
-    <p class="foot">Tudo roda no seu navegador: <b>Stockfish 19</b> (força máxima, avalia e acha o melhor lance) e <b>Maia-3</b> (rede treinada em partidas humanas, mostra o que jogadores de cada nível jogariam). A classificação segue as faixas de pontos esperados do chess.com sobre a curva de chance de vitória publicada pelo Lichess, com uma trava extra: entregar 4+ pontos de material nunca conta como simples imprecisão. O Maia cobre ratings de 600 a 2600; abaixo disso usa 600. O modelo do Maia tem 45 MB e baixa na primeira vez. Peças: set Staunty de sadsnake1 (CC BY-NC-SA 4.0).</p>
+    <p class="foot">Tudo roda no seu navegador: <b>Stockfish 19</b> (força máxima, avalia e acha o melhor lance) e <b>Maia-3</b> (rede treinada em partidas humanas, mostra o que jogadores de cada nível jogariam). A classificação segue as faixas de pontos esperados do chess.com sobre a curva de chance de vitória publicada pelo Lichess, com uma trava extra: entregar 4+ pontos de material nunca conta como simples imprecisão. O Maia cobre ratings de 600 a 2600; abaixo disso usa 600. O modelo do Maia tem 45 MB e baixa na primeira vez. <span id="pieceCredit">Peças: set Staunty de sadsnake1 (CC BY-NC-SA 4.0).</span></p>
   </div>
+  <div class="card" id="chal"></div>
 </section>
 <section id="review" hidden>
   <div id="analyzing" hidden><div class="spin"></div><div class="an-body"><div class="an-top"><b id="an-title">Analisando a partida…</b><span id="an-detail"></span></div><div class="prog big"><div id="anbar"></div></div><div id="an-maia" class="an-maia"></div></div></div>

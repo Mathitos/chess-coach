@@ -6,6 +6,12 @@ const API = 'https://www.googleapis.com'
 
 let tokenClient = null, token = null, tokenExp = 0, fileId = null
 
+// O access token do Google vale ~1h. Guardamos ele no navegador pra um reload
+// não pedir login de novo; quando vence, o app renova no próximo clique.
+const TK = 'coach.gtoken'
+try { const t = JSON.parse(localStorage.getItem(TK) || 'null'); if (t && t.exp > Date.now()) { token = t.token; tokenExp = t.exp } } catch {}
+function persist() { try { token ? localStorage.setItem(TK, JSON.stringify({ token, exp: tokenExp })) : localStorage.removeItem(TK) } catch {} }
+
 export const clientId = typeof __GOOGLE_CLIENT_ID__ !== 'undefined' ? __GOOGLE_CLIENT_ID__ : ''
 export function available() { return !!clientId && !/claude/.test(location.hostname) }
 
@@ -33,6 +39,7 @@ export async function signIn(hintEmail) {
         if (r.error) return reject(new Error(r.error_description || r.error))
         token = r.access_token
         tokenExp = Date.now() + (r.expires_in - 60) * 1000
+        persist()
         resolve()
       },
       error_callback: (e) => reject(new Error(e?.message || e?.type || 'login cancelado')),
@@ -44,6 +51,7 @@ export function signedIn() { return !!token && Date.now() < tokenExp }
 export function signOut() {
   if (token && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(token, () => {})
   token = null; tokenExp = 0; fileId = null
+  persist()
 }
 
 async function api(path, opts = {}) {

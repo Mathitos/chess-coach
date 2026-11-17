@@ -181,6 +181,8 @@ describe('app', () => {
   test('salvar desafios e treinar (local, sem login)', { timeout: 300000 }, async () => {
     const { page, errors } = await newPage()
     assert.equal(await page.locator('#acct button').count(), 0) // sem client id do Google: sem botão de login
+    assert.match(await page.textContent('#chal'), /Nenhum desafio ainda/)
+    assert.equal(await page.isVisible('#trainBtn'), false) // na tela inicial o treino fica no card
     await page.fill('#pgn', read('game2.pgn'))
     await page.click('.chip[data-side=w]')
     await page.click('#go'); await waitDone(page)
@@ -198,12 +200,21 @@ describe('app', () => {
     assert.match(await page.textContent('#coach'), /Desafio 1 de/)
     await page.click('[data-act=tnext]')
     assert.match(await page.textContent('#coach'), /Desafio 2 de/)
-    // persistiu no navegador
+    // persistiu no navegador: aparece no card da tela inicial
     await page.reload()
-    assert.match(await page.textContent('#trainBtn'), /\d/)
-    await page.click('#trainBtn')
+    assert.match(await page.textContent('#chal'), /Últimos desafios/)
+    assert.match(await page.textContent('#chal'), /Seu erro|Punir/)
+    await page.click('#homeTrain')
     await page.waitForSelector('text=Desafio 1 de')
     await page.click('[data-act=texit]')
+    assert.equal(await page.isVisible('#chal'), true) // sair do treino volta pra tela inicial
+    // clicar num desafio da lista abre ele
+    const first = await page.textContent('#chal .ch-list li:first-child b')
+    await page.click('#chal .ch-list li:first-child')
+    await page.waitForSelector('text=Desafio 1 de')
+    assert.ok(first.length > 3)
+    await page.click('#newGame')
+    assert.equal(await page.isVisible('#chal'), true)
     assert.deepEqual(errors, [])
   })
 
@@ -265,6 +276,10 @@ describe('Google Drive (mock do Google)', () => {
       await page.goto(base)
       await page.evaluate(() => localStorage.clear()); await page.reload()
       await page.uncheck('#useMaia'); await page.selectOption('#depth', 'fast')
+      // tela inicial deslogada: desafios pedem login
+      assert.equal(await page.locator('#acct [data-acct=in]').count(), 1)
+      await page.click('#chal [data-home=warn]')
+      assert.match(await page.textContent('#chal'), /Entre com o Google pra ver seus desafios/)
       // salva desafios ANTES do login (ficam locais)
       await page.fill('#pgn', read('game2.pgn')); await page.click('.chip[data-side=w]')
       await page.click('#go'); await waitDone(page)
@@ -281,6 +296,18 @@ describe('Google Drive (mock do Google)', () => {
       await page.waitForTimeout(1500)
       assert.ok(drive.patches >= 1)
       assert.ok(Object.values(drive.file.puzzles).some((p) => p.attempts === 1))
+      // logado: tela inicial mostra a conta e os desafios
+      await page.click('[data-act=texit]'); await page.click('#newGame')
+      assert.match(await page.textContent('#acct'), /Teste/)
+      assert.match(await page.textContent('#chal'), /pra revisar hoje/)
+      // reload não derruba a sessão (token guardado enquanto vale)
+      await page.reload()
+      await page.waitForFunction(() => /salvo no Drive|Google Drive/.test(document.querySelector('#acct').textContent), null, { timeout: 30000 })
+      assert.doesNotMatch(await page.textContent('#acct'), /pausada|Sincronizar/)
+      // Sair esquece o token
+      await page.click('#acct [data-acct=out]')
+      await page.reload()
+      assert.equal(await page.locator('#acct [data-acct=in]').count(), 1)
       assert.deepEqual(errors, [])
       await page.close()
     } finally {

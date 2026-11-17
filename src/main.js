@@ -94,7 +94,9 @@ function initSetup() {
   })
   $('#detect').addEventListener('change', (e) => { if (e.target.id === 'gamePick') { S.gameIdx = +e.target.value; S.pick = null; updateDetect() } })
   updateDetect()
-  $('#newGame').onclick = () => { if (S.training) { S.training = null; S.trainMode = null; S.mode = null; document.body.classList.remove('training') } S.runId++; resetStockfish(); show('setup') }
+  $('#newGame').onclick = goHome
+  $('#home').onclick = goHome
+  $('#chal').onclick = onHomeClick
 }
 
 // ── Input detection (PGN / multi-game PGN / link / FEN) ─────────────────────
@@ -119,6 +121,7 @@ function updateDetect() {
   if (d.kind === 'fen') { el.innerHTML = `<span class="kind">♟ FEN: abre a posição no modo explorar (sem review de partida).</span>`; return }
   if (d.kind === 'link') {
     const site = d.site === 'lichess' ? 'Lichess' : 'chess.com'
+    if (d.site === 'chesscom' && !$('#user').value.trim()) $('details.more').open = true
     el.innerHTML = `<span class="kind">🔗 Link do ${site}: vou buscar a partida${d.site === 'chesscom' ? ' no arquivo do usuário acima' : ''}. Só funciona na versão do GitHub Pages; no claude.ai cola o PGN.</span>`
     return
   }
@@ -388,6 +391,8 @@ function boardViewBase() {
   if (M && (M.type === 'retry' || M.type === 'puzzle')) {
     const v = { fen: M.fen, last: null, arrows: [], sel: M.sel, dots: [], marks: [] }
     if (M.sel) v.dots = new Chess(M.fen).moves({ square: M.sel, verbose: true }).map((m) => m.to)
+    if (M.last) v.last = { from: M.last.from, to: M.last.to, color: '#f5f682', op: 0.45 }
+    if (M.played && !M.wrong && !M.solved) { v.arrows.push([M.played.slice(0, 2), M.played.slice(2, 4), 'rgba(250,65,45,.75)', 13]); v.marks.push([M.played.slice(0, 2), 'rgba(250,65,45,.28)']) }
     if (M.hint) v.marks.push([M.hint, 'rgba(129,182,76,.55)'])
     if (M.wrong) v.last = { from: M.wrong.slice(0, 2), to: M.wrong.slice(2, 4), color: '#fa412d', op: 0.45 }
     if (M.solved) v.last = { from: M.solved.slice(0, 2), to: M.solved.slice(2, 4), color: '#81b64c', op: 0.55 }
@@ -594,7 +599,9 @@ function lineStep(d) { const M = S.mode; stopTimer(); M.playing = false; M.i = M
 function startRetry(k, prompt) {
   stopTimer()
   S.overlay = null; S.overlayIdx = null
-  S.mode = { type: 'retry', k, fen: S.game.positions[k], sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, prompt }
+  const g = S.game, pl = g.plies[k], prev = k > 0 ? g.plies[k - 1] : null
+  S.mode = { type: 'retry', k, fen: g.positions[k], sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, prompt,
+    played: pl ? pl.from + pl.to : null, last: prev ? { from: prev.from, to: prev.to } : null, prevFen: k > 0 ? g.positions[k - 1] : null }
   render()
 }
 async function tryMove(uci) {
@@ -875,9 +882,9 @@ function renderModePanel(box) {
     return
   }
   const side = p.color === 'w' ? 'Brancas' : 'Pretas'
-  let html = `<div class="coach-head"><div class="avatar">↻</div><div><b>Tentar de novo: ${esc(moveLbl)}</b><div class="sub">Você joga de ${side}. Arrasta a peça (ou clica nela e depois na casa).</div></div></div>`
+  let html = `<div class="coach-head"><div class="avatar">↻</div><div><b>Tentar de novo: ${esc(moveLbl)}</b><div class="sub">Você joga de ${side}. Arrasta a peça (ou clica nela e depois na casa).${M.played && !M.wrong && !M.solved ? ' <span style="color:#ff8a7a">Seta vermelha: o lance da partida.</span>' : ''}</div></div></div>`
   if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
-  else html += `<p class="say">${M.prompt ? esc(M.prompt) : `Na partida você jogou ${esc(p.san)}. Acha um lance melhor?`}</p>`
+  else html += `<p class="say">${linkify(M.prompt || `Na partida você jogou ${p.san}. Acha um lance melhor?`, [M.fen, M.prevFen])}</p>`
   html += `<div class="acts">`
   if (!M.solved) {
     if (!M.hint) html += `<button class="btn act" data-act="hint">💡 Dica</button>`
@@ -1028,6 +1035,7 @@ async function googleLogin() {
     const u = await G.userInfo()
     const anon = store.get('puzzles.local', null)
     S.account = { email: u.email, name: u.given_name || u.name || u.email }
+    S.homeWarn = false
     store.set('account', S.account)
     loadLocal()
     if (anon) { S.store = P.mergeStores(S.store, anon); store.set('puzzles.local', null) } // adota desafios salvos antes do login
@@ -1039,15 +1047,82 @@ function googleLogout() {
   G.signOut(); S.account = null; store.set('account', null); S.syncMsg = null
   loadLocal(); renderAcct()
 }
+const GLOGO = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>'
+const TARGET = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#81b64c" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="#81b64c"/></svg>'
+const EMPTYBOARD = '<svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true"><rect x="8" y="8" width="80" height="80" rx="6" fill="none" stroke="#5a5652" stroke-width="2"/>' + [[8, 8], [48, 8], [28, 28], [68, 28], [8, 48], [48, 48], [28, 68], [68, 68]].map(([x, y]) => `<rect x="${x}" y="${y}" width="20" height="20" fill="#3c3936"/>`).join('') + '</svg>'
+const loginBtn = (label = 'Entrar com Google') => `<button class="btn gbtn" data-acct="in">${GLOGO}${label}</button>`
+
 function renderAcct() {
   const el = $('#acct'); if (!el) return
   const st = P.stats(S.store || P.emptyStore())
   $('#trainBtn').innerHTML = `🎯 Treinar${st.due ? ` <span class="pill">${st.due}</span>` : st.total ? ` <span class="pill muted">${st.total}</span>` : ''}`
-  if (!G.available()) { el.innerHTML = ''; return }
-  const msg = S.syncMsg ? `<span class="muted sm">${esc(S.syncMsg)}</span>` : ''
-  if (G.signedIn()) el.innerHTML = `${msg}<span class="who" title="${esc(S.account?.email || '')}">☁️ ${esc(S.account?.name || '')}</span><button class="btn" data-acct="out">Sair</button>`
-  else if (S.account) el.innerHTML = `${msg}<button class="btn" data-acct="in" title="Reconectar pra sincronizar com o Drive">☁️ Conectar ${esc(S.account.name)}</button>`
-  else el.innerHTML = `${msg}<button class="btn" data-acct="in">Entrar com Google</button>`
+  renderHome()
+  if (!G.available()) { el.innerHTML = S.syncMsg ? `<span class="muted sm">${esc(S.syncMsg)}</span>` : ''; return }
+  if (S.account) {
+    const sub = S.syncMsg || (G.signedIn() ? 'Desafios salvos no Google Drive' : 'Sincronização pausada')
+    el.innerHTML = `<div class="av" title="${esc(S.account.email || '')}">${esc((S.account.name || '?')[0].toUpperCase())}</div><div class="acct-txt"><b>${esc(S.account.name || '')}</b><span>${esc(sub)}</span></div>${G.signedIn() ? '' : '<button class="btn" data-acct="in" title="Reconectar pra sincronizar com o Drive">Sincronizar</button>'}<button class="btn outline" data-acct="out">Sair</button>`
+  } else el.innerHTML = `${S.syncMsg ? `<span class="muted sm">${esc(S.syncMsg)}</span>` : ''}${loginBtn()}`
+}
+
+// Home: card "Meus desafios" (needs Google login when login is available)
+function puzzleTitle(p) {
+  const n = +(p.fen.split(' ')[5] || 1)
+  if (p.type === 'chance') {
+    const opp = p.oppSan || (/jogar (\S+)\. Ache/.exec(p.prompt || '') || [])[1] || ''
+    const no = p.color === 'w' ? `${n - 1}...` : `${n}.`
+    return opp ? `${no} ${opp}: ache a punição` : 'Ache a punição'
+  }
+  return `${n}${p.color === 'w' ? '.' : '...'} ${p.played}: ache um lance melhor`
+}
+function puzzleWhen(p, now = Date.now()) {
+  const d = Math.ceil(((p.due || 0) - now) / P.DAY)
+  return d <= 0 ? 'hoje' : d === 1 ? 'amanhã' : `em ${d} dias`
+}
+function renderHome() {
+  const el = $('#chal'); if (!el) return
+  const head = `<div class="ch-head">${TARGET}<h2>Meus desafios</h2></div>`
+  const needLogin = G.available() && !S.account
+  if (needLogin) {
+    const anon = Object.keys(S.store?.puzzles || {}).length
+    el.innerHTML = head + `<p class="ch-p">Seus erros e as chances que você deixa passar viram desafios pra treinar depois, com revisão espaçada até fixar.</p>` +
+      (S.homeWarn
+        ? `<div class="ch-warn" role="status"><p class="t">Entre com o Google pra ver seus desafios</p><p>Os desafios ficam salvos no seu Google Drive, numa pasta só do app. Assim eles acompanham você em qualquer aparelho.${anon ? ` Os ${anon} desafio${anon > 1 ? 's' : ''} que você já salvou neste navegador vão junto pra sua conta.` : ''}</p><div>${loginBtn()}</div></div>`
+        : `<button class="btn big" data-home="warn">Ver meus desafios</button><p class="ch-note">Pra salvar e sincronizar entre aparelhos, entre com sua conta Google.</p>`)
+    return
+  }
+  const st = P.stats(S.store || P.emptyStore())
+  const local = !G.available() ? '<p class="ch-note">Aqui os desafios ficam salvos só neste navegador. Na versão do GitHub Pages dá pra entrar com o Google e sincronizar.</p>' : ''
+  if (!st.total) {
+    el.innerHTML = head + `<div class="ch-empty">${EMPTYBOARD}<p class="t">Nenhum desafio ainda</p><p class="ch-p">Seus desafios vão aparecer aqui conforme você revisar partidas. No fim de cada review, os momentos-chave viram desafios.</p></div>` + local
+    return
+  }
+  const all = Object.values(S.store.puzzles).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  const list = S.homeAll ? all : all.slice(0, 4)
+  el.innerHTML = head +
+    `<div class="ch-stats"><div><b class="hi">${st.due}</b><span>pra revisar hoje</span></div><div><b>${st.total}</b><span>desafio${st.total > 1 ? 's' : ''}</span></div><div><b>${st.learned}</b><span>aprendido${st.learned === 1 ? '' : 's'}</span></div></div>` +
+    `<button class="btn big green" id="homeTrain" data-home="train">${st.due ? `Treinar agora · ${st.due} desafio${st.due > 1 ? 's' : ''}` : 'Treinar mesmo assim'}</button>` +
+    (st.due ? '' : '<p class="ch-note">Nada vencido hoje. Os desafios voltam no dia certo pra fixar; dá pra treinar extra mesmo assim.</p>') +
+    `<div><h3 class="ch-note" style="font-weight:600;color:#cfcbc6;margin:6px 0 4px">${S.homeAll ? 'Todos os desafios' : 'Últimos desafios'}</h3><ul class="ch-list">` +
+    list.map((p) => {
+      const opp = p.color === 'w' ? p.game?.black : p.game?.white
+      const dt = (p.game?.date || '').split('.')
+      return `<li data-pz="${esc(p.id)}" title="Treinar este desafio"><span class="ty ${p.type === 'chance' ? 'chance' : 'erro'}">${p.type === 'chance' ? 'Punir' : 'Seu erro'}</span><div class="mid"><b>${esc(puzzleTitle(p))}</b><span>${opp ? 'vs ' + esc(opp) : ''}${dt.length === 3 ? ' · ' + dt[2] + '/' + dt[1] : ''}</span></div><span class="when">${puzzleWhen(p)}</span></li>`
+    }).join('') + `</ul>` +
+    (all.length > 4 ? `<button class="linkbtn" data-home="all">${S.homeAll ? 'Mostrar só os últimos' : `Ver todos os ${all.length} desafios`}</button>` : '') + `</div>` + local
+}
+function onHomeClick(e) {
+  const acct = e.target.closest('[data-acct]')
+  if (acct) return acct.dataset.acct === 'in' ? googleLogin() : googleLogout()
+  const li = e.target.closest('[data-pz]')
+  if (li) return startTraining([li.dataset.pz])
+  const b = e.target.closest('[data-home]'); if (!b) return
+  if (b.dataset.home === 'warn') { S.homeWarn = true; renderHome() }
+  else if (b.dataset.home === 'train') startTraining()
+  else if (b.dataset.home === 'all') { S.homeAll = !S.homeAll; renderHome() }
+}
+function goHome() {
+  if (S.training) { S.training = null; S.trainMode = null; S.mode = null; S.reviewSnapshot = null; document.body.classList.remove('training') }
+  stopAuto(); stopTimer(); S.runId++; resetStockfish(); show('setup'); renderAcct()
 }
 
 function makePuzzles() {
@@ -1064,7 +1139,8 @@ function makePuzzles() {
       wpBefore: color === 'w' ? info.wpW : 100 - info.wpW, type: m.type,
       idea: R.explainBestMove(fen, line, color, motif, S.threats[kt]),
       prompt: m.type === 'erro' ? `Na partida você jogou ${g.plies[kt].san} aqui (${R.CLASSES[S.cls[kt].cls].label.toLowerCase()}). Ache um lance melhor.` : `O adversário acabou de jogar ${g.plies[m.k].san}. Ache a punição!`,
-      played: g.plies[kt].san,
+      played: g.plies[kt].san, oppSan: kt > 0 ? g.plies[kt - 1].san : undefined,
+      last: kt > 0 ? { from: g.plies[kt - 1].from, to: g.plies[kt - 1].to } : null, prevFen: kt > 0 ? g.positions[kt - 1] : null,
       game: { white: h.White || '', black: h.Black || '', date: h.Date || '', result: h.Result || '', link: h.Link || h.Site || '' },
     })
   }
@@ -1080,11 +1156,13 @@ function savePuzzles() {
 
 // Training session
 const REVIEW_KEYS = ['game', 'sf', 'threats', 'infos', 'cls', 'maia', 'maiaRaw', 'idx', 'side', 'flip', 'clock', 'vars', 'anCache', 'maiaElo', 'guide']
-function startTraining() {
+function startTraining(first) {
+  if (G.available() && !S.account) { S.homeWarn = true; goHome(); return }
   const due = P.dueList(S.store)
   const all = Object.values(S.store.puzzles)
   if (!all.length) { alertBox('Você ainda não tem desafios salvos. Revise uma partida e clique em "💾 Salvar desafios".'); return }
-  const queue = (due.length ? due : all.sort(() => Math.random() - 0.5)).slice(0, 15).map((p) => p.id)
+  let queue = (due.length ? due : all.sort(() => Math.random() - 0.5)).slice(0, 15).map((p) => p.id)
+  if (first?.length) queue = [...first, ...queue.filter((id) => !first.includes(id))]
   if (!S.training && S.game) S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
   stopAuto(); stopTimer()
   S.training = { queue, pos: 0, extra: !due.length, done: 0, ok: 0 }
@@ -1099,7 +1177,9 @@ function openPuzzle() {
   if (!p) return finishTraining()
   const flip = p.color === 'b'
   Object.assign(S, { game: { headers: { White: p.game.white, Black: p.game.black }, plies: [], positions: [p.fen] }, sf: [], threats: [], infos: [], cls: [], maia: [], vars: [], anCache: {}, idx: 0, side: p.color, flip, clock: null, guide: false })
-  S.trainMode = { type: 'puzzle', p, fen: p.fen, k: 0, sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, clean: true }
+  let played = null
+  try { const m = new Chess(p.fen).move(p.played); played = m.from + m.to } catch {}
+  S.trainMode = { type: 'puzzle', p, fen: p.fen, k: 0, sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, clean: true, played, last: p.last || null, prevFen: p.prevFen || null }
   S.mode = S.trainMode
   render()
 }
@@ -1151,9 +1231,9 @@ function renderPuzzlePanel(box) {
   const p = M.p
   const st = P.stats(S.store)
   const g = p.game
-  let html = `<div class="coach-head"><div class="avatar">🎯</div><div><b>Desafio ${T.pos + 1} de ${T.queue.length}</b>${T.extra ? ' <span class="tag">treino extra</span>' : ''}<div class="sub">${esc(g.white)} x ${esc(g.black)}${g.date ? ' · ' + esc(g.date) : ''} · você joga de ${p.color === 'w' ? 'Brancas' : 'Pretas'} · ${st.due} pra revisar · ${st.learned}/${st.total} aprendidos</div></div></div>`
+  let html = `<div class="coach-head"><div class="avatar">🎯</div><div><b>Desafio ${T.pos + 1} de ${T.queue.length}</b>${T.extra ? ' <span class="tag">treino extra</span>' : ''}<div class="sub">${esc(g.white)} x ${esc(g.black)}${g.date ? ' · ' + esc(g.date) : ''} · você joga de ${p.color === 'w' ? 'Brancas' : 'Pretas'} · ${st.due} pra revisar · ${st.learned}/${st.total} aprendidos${M.played && !M.wrong && !M.solved ? ' · <span style="color:#ff8a7a">seta vermelha: o lance da partida</span>' : ''}</div></div></div>`
   if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
-  else html += `<p class="say">${esc(p.prompt)}</p>`
+  else html += `<p class="say">${linkify(p.prompt, [M.fen, p.prevFen])}</p>`
   html += `<div class="acts">`
   if (!M.solved) {
     if (!M.hint) html += `<button class="btn act" data-act="thint">💡 Dica</button>`
@@ -1332,6 +1412,20 @@ function init() {
   loadLocal()
   $('#trainBtn').onclick = () => (S.training ? exitTraining() : startTraining())
   $('#acct').onclick = (e) => { const b = e.target.closest('[data-acct]'); if (!b) return; b.dataset.acct === 'in' ? googleLogin() : googleLogout() }
+  // Sessão: conta fica lembrada até clicar em Sair. Se o token venceu, renova
+  // sozinho no primeiro clique (o Google exige um clique pra abrir o popup).
+  if (S.account && G.available()) {
+    if (G.signedIn()) syncDrive()
+    else {
+      const renew = (e) => {
+        if (G.signedIn() || !S.account || e.target.closest('[data-acct]')) return
+        document.removeEventListener('pointerdown', renew, true)
+        googleLogin() // sem re-render aqui pra não engolir o clique em andamento
+      }
+      document.addEventListener('pointerdown', renew, true)
+    }
+  }
+  document.body.dataset.view = 'setup'
   renderAcct()
   $('#first').onclick = () => go(0)
   $('#prev').onclick = () => navStep(-1)
