@@ -127,3 +127,15 @@ function sortKey(g) {
   const t = Date.parse(d)
   return Number.isFinite(t) ? t : g.analyzedAt || 0
 }
+
+// "10+0" -> "Rápida · 10 min", "1/86400" -> "Diária"
+export function tcLabel(tc) {
+  if (!tc || tc === '-' || tc === '?') return ''
+  if (tc.includes('/')) return 'Diária'
+  const [b, i] = tc.split('+').map(Number)
+  if (!isFinite(b)) return ''
+  const est = b + 40 * (i || 0)
+  const kind = est < 180 ? 'Bullet' : est < 600 ? 'Blitz' : est < 3600 ? 'Rápida' : 'Clássica'
+  const base = b >= 60 ? `${Math.round(b / 60)} min` : `${b}s`
+  return `${kind} · ${base}${i ? ' + ' + i + 's' : ''}`
+}

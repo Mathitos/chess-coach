@@ -222,6 +222,18 @@ header{position:relative}
 .mbox{background:var(--panel);border-radius:14px;padding:26px;max-width:440px;width:100%;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
 .mbox h2{margin:0;font-size:21px}
 .mact{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid #45423f;margin:10px 0 16px}
+.tab{background:none;border:0;padding:10px 14px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-1px}
+.tab:hover{color:var(--txt)}.tab.on{color:var(--txt);border-bottom-color:var(--green)}
+#recentPane[hidden],#pastePane[hidden]{display:none}
+.rhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;color:#cfcbc6;margin-bottom:8px}
+.rhead .grow{flex:1}
+.rlist{list-style:none;margin:0;padding:0;max-height:440px;overflow:auto}
+.rlist li{display:grid;grid-template-columns:22px 1fr auto;gap:4px 12px;align-items:center;padding:10px 6px;border-top:1px solid #45423f;cursor:pointer;border-radius:6px}
+.rlist li:hover{background:var(--panel2)}
+.rlist .who{font-weight:600}.rlist .meta{grid-column:2;font-size:12.5px;color:var(--muted)}
+.rlist .tagz{grid-row:1/3;grid-column:3;display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:12px}
+.done{background:#3d4a2f;color:#cfe8b0;border-radius:6px;padding:2px 7px;font-weight:600}
 @media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
 </style>
 </head>
@@ -238,6 +250,9 @@ header{position:relative}
 <section id="setup">
   <div class="card" id="revCard">
     <h2>Revisar uma partida</h2>
+    <div class="tabs" role="tablist"><button class="tab on" role="tab" data-tab="paste" aria-selected="true">Colar partida</button><button class="tab" role="tab" data-tab="recent" aria-selected="false">Minhas partidas</button></div>
+    <div id="recentPane" hidden></div>
+    <div id="pastePane">
     <p class="lead">Cola o que o chess.com ou o Lichess compartilham: <b>PGN</b> (com ou sem tempo, uma ou várias partidas), <b>link da partida</b> ou <b>FEN</b> (abre a posição pra explorar).</p>
     <textarea id="pgn" placeholder="[Event &quot;Live Chess&quot;]&#10;...&#10;1. e4 e5 2. Nf3 ...&#10;&#10;ou https://www.chess.com/game/live/123456789&#10;ou um FEN"></textarea>
     <div id="detect"></div>
@@ -253,6 +268,7 @@ header{position:relative}
     </details>
     <div class="actions"><button class="btn primary" id="go">Revisar partida</button><button class="btn" id="sample">Usar exemplo</button></div>
     <div id="err"></div>
+    </div>
     <p class="foot">Tudo roda no seu navegador: <b>Stockfish 19</b> (força máxima, avalia e acha o melhor lance) e <b>Maia-3</b> (rede treinada em partidas humanas, mostra o que jogadores de cada nível jogariam). A classificação segue as faixas de pontos esperados do chess.com sobre a curva de chance de vitória publicada pelo Lichess, com uma trava extra: entregar 4+ pontos de material nunca conta como simples imprecisão. O Maia cobre ratings de 600 a 2600; abaixo disso usa 600. O modelo do Maia tem 45 MB e baixa na primeira vez. <span id="pieceCredit">Peças: set Hera de Toan Hoang (MIT).</span></p>
   </div>
   <div id="rightCol"><div class="card" id="chal"></div><div class="card" id="stats" hidden></div></div>

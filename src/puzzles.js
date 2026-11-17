@@ -11,7 +11,7 @@ export function puzzleId(fen, uci) {
   return 'p' + h.toString(36)
 }
 
-export function emptyStore() { return { v: 1, updatedAt: 0, puzzles: {}, deleted: {}, games: {} } }
+export function emptyStore() { return { v: 1, updatedAt: 0, puzzles: {}, deleted: {}, games: {}, profile: null } }
 
 // Union of two stores: newest version of each puzzle wins; deletions win over older edits.
 export function mergeStores(a, b) {
@@ -28,6 +28,9 @@ export function mergeStores(a, b) {
     const cur = out.games[id]
     if (!cur || (g.analyzedAt || 0) > (cur.analyzedAt || 0)) out.games[id] = g
   }
+  // configurações do usuário (jogador do chess.com/Lichess etc.): a mais recente vence
+  const pa = a.profile, pb = b.profile
+  out.profile = pa && pb ? ((pb.updatedAt || 0) > (pa.updatedAt || 0) ? pb : pa) : pa || pb || null
   out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0)
   return out
 }
@@ -76,4 +79,22 @@ export function dueList(store, now = Date.now()) {
 export function stats(store, now = Date.now()) {
   const all = Object.values(store.puzzles)
   return { total: all.length, due: all.filter((p) => (p.due || 0) <= now).length, learned: all.filter((p) => (p.box || 0) >= 3).length }
+}
+
+// Embaralha e espalha: evita dois desafios seguidos da mesma partida quando dá.
+export function shuffleSpread(list, rnd = Math.random) {
+  const groups = new Map()
+  for (const p of list) { const k = p.game?.id || p.game?.link || `${p.game?.white}|${p.game?.black}|${p.game?.date}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p) }
+  const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] } return a }
+  const gs = shuffle([...groups.entries()].map(([k, a]) => ({ k, a: shuffle(a.slice()) })))
+  const out = []
+  let last = null
+  while (out.length < list.length) {
+    // pega do grupo com mais itens restantes que não seja o último usado (desempate aleatório pela ordem)
+    let best = null
+    for (const g of gs) if (g.a.length && g.k !== last && (!best || g.a.length > best.a.length)) best = g
+    if (!best) best = gs.find((g) => g.a.length) // só sobrou a mesma partida
+    out.push(best.a.pop()); last = best.k
+  }
+  return out
 }

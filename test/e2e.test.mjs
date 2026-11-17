@@ -78,7 +78,7 @@ describe('app', () => {
     await page.evaluate(() => document.querySelector('#mv33').click())
     await page.click('[data-act=retry]')
     await drag(page, 'a3', 'a4')
-    await page.waitForFunction(() => /não é o melhor/.test(document.querySelector('#coach').textContent), null, { timeout: 60000 })
+    await page.waitForFunction(() => /não é a resposta/.test(document.querySelector('#coach').textContent), null, { timeout: 60000 })
     await page.click('[data-act=reveal]')
     assert.match(await page.textContent('#coach'), /O lance era/)
     assert.deepEqual(errors, [])
@@ -219,6 +219,13 @@ describe('app', () => {
     await page.click('#chal .ch-list li:first-child')
     await page.waitForSelector('text=Desafio 1 de')
     assert.ok(first.length > 3)
+    assert.doesNotMatch(await page.textContent('#coach'), /você jogou|seta vermelha/) // puzzle não entrega o lance da partida
+    // depois de mostrar a resposta, abre a partida nesse momento
+    await page.click('[data-act=treveal]')
+    await page.click('[data-act=tgame]')
+    await page.waitForFunction(() => !/^0\//.test(document.querySelector('#counter').textContent), null, { timeout: 30000 })
+    assert.equal(await page.isVisible('#review'), true)
+    await waitDone(page)
     await page.click('#newGame')
     assert.equal(await page.isVisible('#chal'), true)
     assert.deepEqual(errors, [])
@@ -260,6 +267,36 @@ describe('app', () => {
     assert.equal(await page.isVisible('#settings'), false)
     await page.click('#stats .glist li >> nth=0')
     await waitDone(page)
+    assert.deepEqual(errors, [])
+  })
+
+  test('aba Minhas partidas: lista as recentes do usuário configurado e abre uma', { timeout: 300000 }, async () => {
+    const { page, errors } = await newPage()
+    const g1 = read('game2.pgn'), g2 = read('game-clock.pgn')
+    await page.route('https://api.chess.com/**', (r) => {
+      const u = r.request().url()
+      if (u.endsWith('/games/archives')) return r.fulfill({ json: { archives: ['https://api.chess.com/pub/player/matheus_anzzulin/games/2026/11'] } })
+      return r.fulfill({ json: { games: [{ pgn: g1, end_time: 2 }, { pgn: g2, end_time: 1 }] } })
+    })
+    assert.equal(await page.isVisible('#pgn'), true) // começa na aba de colar
+    await page.click('.tab[data-tab=recent]')
+    assert.equal(await page.isVisible('#pgn'), false)
+    await page.click('#recentPane [data-rc=cfg]') // sem usuário: manda configurar
+    assert.equal(await page.isVisible('#settings'), true)
+    await page.fill('#sUser', 'matheus_anzzulin')
+    await page.mouse.click(640, 30) // fecha o menu (clique no cabeçalho): busca as partidas
+    await page.waitForSelector('#recentPane .rlist li')
+    assert.equal(await page.locator('#recentPane .rlist li').count(), 2)
+    assert.match(await page.textContent('#recentPane'), /vs Ronkolan/)
+    assert.match(await page.textContent('#recentPane .rlist li >> nth=0'), /Brancas/)
+    await page.click('#recentPane .rlist li >> nth=0')
+    await waitDone(page)
+    assert.match(await page.textContent('#players'), /Ronkolan/)
+    // ao voltar, a aba continua e a partida aparece como analisada
+    await page.click('#newGame')
+    assert.match(await page.textContent('#recentPane .rlist li >> nth=0'), /✓/)
+    await page.click('.tab[data-tab=paste]')
+    assert.equal(await page.isVisible('#pgn'), true)
     assert.deepEqual(errors, [])
   })
 
@@ -348,8 +385,12 @@ describe('Google Drive (mock do Google)', () => {
       await page.waitForTimeout(1500)
       assert.ok(drive.patches >= 1)
       assert.ok(Object.values(drive.file.puzzles).some((p) => p.attempts === 1))
-      // logado: tela inicial mostra a conta e os desafios
+      // usuário do chess.com configurado vai pro Drive junto com os desafios
       await page.click('[data-act=texit]'); await page.click('#newGame')
+      await page.click('#gear'); await page.fill('#sUser', 'fulano_123'); await page.mouse.click(200, 700)
+      for (let i = 0; i < 50 && drive.file.profile?.user !== 'fulano_123'; i++) await page.waitForTimeout(200)
+      assert.equal(drive.file.profile?.user, 'fulano_123')
+      // logado: tela inicial mostra a conta e os desafios
       assert.match(await page.textContent('#acct'), /Teste/)
       assert.match(await page.textContent('#chal'), /pra revisar hoje/)
       // reload não derruba a sessão (token guardado enquanto vale)

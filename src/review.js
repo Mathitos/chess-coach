@@ -696,7 +696,7 @@ export function describeThreat(fen, nullAnalysis, curInfo, mover) {
 }
 
 // Feedback for a "retry" attempt. analysis: engine result for the position after the attempt.
-export function attemptFeedback(fenB, uci, analysis, color, wpBefore) {
+export function attemptFeedback(fenB, uci, analysis, color, wpBefore, bestLine) {
   const ch = new Chess(fenB)
   let m
   try { m = ch.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { return null }
@@ -714,9 +714,22 @@ export function attemptFeedback(fenB, uci, analysis, color, wpBefore) {
     const mat = reply ? pvMaterial(fenB, [m.from + m.to + (m.promotion || ''), ...reply.pv], color) : null
     if (mat && mat.delta <= -2 && hang.length) why = `deixa ${named(hang[0].type, hang[0].sq)} sem defesa`
     else if (mat && mat.delta <= -2) why = `depois de ${rm.san} você ${lossText(mat, color)}`
-    else if (rm.san) why = `a resposta ${rm.san} complica`
+    else if (mat && mat.delta <= -1) why = `depois de ${rm.san} você ${lossText(mat, color)}`
+    else if (rm.fork) why = `a resposta ${rm.san} é um garfo`
+    else if (rm.check) why = `a resposta ${rm.san} vem com xeque e o adversário toma a iniciativa`
   }
-  return { ok: false, san: m.san, wp, text: `${m.san} não é o melhor${why ? ': ' + why : ''}. Sua chance ficaria em ${Math.round(wp)}%.` }
+  // o que a posição tinha de melhor (sem entregar o lance)
+  let missed = ''
+  if (bestLine && bestLine.pv && bestLine.pv.length) {
+    const bm = lineMotif(fenB, bestLine, color)
+    if (bm.mate) missed = `tem mate forçado em ${bm.mate} nessa posição`
+    else if (bm.mat && bm.mat.delta >= 2) missed = 'tem um lance que ganha material'
+    else if (bm.fork) missed = 'tem um garfo nessa posição'
+    else if (bm.pin) missed = 'tem uma cravada nessa posição'
+  }
+  if (!why && !missed && rm.san) why = `depois de ${rm.san} o adversário fica melhor`
+  const chance = `Sua chance ficaria em ${Math.round(wp)}%${wpBefore - wp >= 3 ? ` (com o melhor lance, ${Math.round(wpBefore)}%)` : ''}.`
+  return { ok: false, san: m.san, wp, text: `${m.san} não é a resposta${why ? ': ' + why : ''}. ${missed ? 'Procura de novo: ' + missed + '. ' : ''}${chance}` }
 }
 export { explainBest as explainBestMove, lineMotif }
 

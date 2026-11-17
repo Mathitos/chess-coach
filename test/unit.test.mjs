@@ -148,6 +148,8 @@ describe('engine (Stockfish) + classificação', () => {
     const fb = R.attemptFeedback(fen, 'a3a4', an, 'w', wb)
     assert.equal(fb.ok, false)
     assert.match(fb.text, /mate em 1/)
+    const fb2 = R.attemptFeedback(fen, 'a3a4', an, 'w', wb, before.lines[0])
+    assert.match(fb2.text, /^a4 não é a resposta: permite mate em 1/)
   })
 })
 
@@ -247,6 +249,30 @@ describe('minhas partidas (busca e ids)', () => {
     assert.equal(L.gameId({}, '1. e4 e5'), L.gameId({}, '1.  e4   e5'))
     assert.equal(L.sideFor({ White: 'A', Black: 'Fulano' }, 'fulano'), 'b')
     assert.equal(L.sideFor({ White: 'A', Black: 'B' }, 'c'), null)
+  })
+  test('desafios embaralhados sem dois seguidos da mesma partida', () => {
+    const mk = (g, i) => ({ id: g + i, game: { id: g } })
+    const list = [...[0, 1, 2, 3].map((i) => mk('A', i)), ...[0, 1, 2].map((i) => mk('B', i)), ...[0, 1].map((i) => mk('C', i))]
+    for (let t = 0; t < 20; t++) {
+      const out = P.shuffleSpread(list)
+      assert.equal(out.length, list.length)
+      assert.equal(new Set(out.map((p) => p.id)).size, list.length)
+      for (let i = 1; i < out.length; i++) assert.notEqual(out[i].game.id, out[i - 1].game.id)
+    }
+  })
+  test('configurações: a mais recente vence no merge', () => {
+    const a = P.emptyStore(), b = P.emptyStore()
+    a.profile = { user: 'velho', updatedAt: 1 }; b.profile = { user: 'novo', updatedAt: 2 }
+    assert.equal(P.mergeStores(a, b).profile.user, 'novo')
+    assert.equal(P.mergeStores(b, a).profile.user, 'novo')
+    assert.equal(P.mergeStores(P.emptyStore(), a).profile.user, 'velho')
+  })
+  test('rótulo do controle de tempo', () => {
+    assert.equal(L.tcLabel('600'), 'Rápida · 10 min')
+    assert.equal(L.tcLabel('180+2'), 'Blitz · 3 min + 2s')
+    assert.equal(L.tcLabel('60'), 'Bullet · 1 min')
+    assert.equal(L.tcLabel('1/86400'), 'Diária')
+    assert.equal(L.tcLabel('-'), '')
   })
   test('merge guarda as partidas analisadas dos dois aparelhos', () => {
     const a = P.emptyStore(), b = P.emptyStore()

@@ -397,10 +397,16 @@ function boardViewBase() {
     const v = { fen: M.fen, last: null, arrows: [], sel: M.sel, dots: [], marks: [] }
     if (M.sel) v.dots = new Chess(M.fen).moves({ square: M.sel, verbose: true }).map((m) => m.to)
     if (M.last) v.last = { from: M.last.from, to: M.last.to, color: '#f5f682', op: 0.45 }
-    if (M.played && !M.wrong && !M.solved) { v.arrows.push([M.played.slice(0, 2), M.played.slice(2, 4), 'rgba(250,65,45,.75)', 13]); v.marks.push([M.played.slice(0, 2), 'rgba(250,65,45,.28)']) }
+    // lance certo fica no tabuleiro com um ✓; enquanto confere, a peça fica onde foi solta
+    const shown = M.solved || (M.busy && M.pending)
+    if (shown) {
+      try { const ch = new Chess(M.fen); ch.move({ from: shown.slice(0, 2), to: shown.slice(2, 4), promotion: shown[4] || 'q' }); v.fen = ch.fen() } catch {}
+      v.last = { from: shown.slice(0, 2), to: shown.slice(2, 4), color: M.solved ? '#81b64c' : '#f5f682', op: 0.55 }
+      if (M.solved) v.badge = [shown.slice(2, 4), { color: '#81b64c', sym: '✓' }]
+    } else if (M.wrong) v.badge = [M.wrong.slice(2, 4), { color: '#fa412d', sym: '✗' }]
+    if (M.played && !M.wrong && !M.solved && !(M.busy && M.pending)) { v.arrows.push([M.played.slice(0, 2), M.played.slice(2, 4), 'rgba(250,65,45,.75)', 13]); v.marks.push([M.played.slice(0, 2), 'rgba(250,65,45,.28)']) }
     if (M.hint) v.marks.push([M.hint, 'rgba(129,182,76,.55)'])
-    if (M.wrong) v.last = { from: M.wrong.slice(0, 2), to: M.wrong.slice(2, 4), color: '#fa412d', op: 0.45 }
-    if (M.solved) v.last = { from: M.solved.slice(0, 2), to: M.solved.slice(2, 4), color: '#81b64c', op: 0.55 }
+    if (M.wrong && !shown) v.last = { from: M.wrong.slice(0, 2), to: M.wrong.slice(2, 4), color: '#fa412d', op: 0.45 }
     return addHover(v)
   }
   const last = i > 0 ? g.plies[i - 1] : null
@@ -621,12 +627,12 @@ async function tryMove(uci) {
     Object.assign(M, { busy: false, ok: true, solved: uci, msg: `Isso! ${san} era o melhor lance${ex ? ': ' + ex : ''}.` })
     return render()
   }
-  M.msg = `Conferindo ${san}…`; render()
+  M.msg = `Conferindo ${san}…`; M.pending = uci; render()
   try {
     const ch = new Chess(M.fen); ch.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' })
     const an = ch.isGameOver() ? { lines: [] } : await getStockfish().u.analyse(ch.fen(), { depth: 14, movetime: 1200 })
     if (S.mode !== M) return
-    const fb = R.attemptFeedback(M.fen, uci, an, c, r.wpBefore)
+    const fb = R.attemptFeedback(M.fen, uci, an, c, r.wpBefore, S.sf[k]?.lines?.[0])
     if (fb.ok) Object.assign(M, { ok: true, solved: uci, msg: `Boa! ${fb.text} O engine preferia ${R.playLine(M.fen, [bestUci]).moves[0]?.san}.` })
     else Object.assign(M, { ok: false, wrong: uci, msg: fb.text + (M.tries >= 2 && !M.hint ? ' Quer uma dica?' : '') })
   } catch (e) { M.msg = 'Não consegui conferir: ' + e.message }
@@ -909,7 +915,7 @@ function onCoachAction(e) {
   const lm = e.target.closest('.lm')
   if (b && ['gstart', 'gauto', 'gskip', 'gnext', 'gprev', 'gstop'].includes(b.dataset.act)) return guideAction(b.dataset.act)
   if (b && b.dataset.act === 'gsave') return savePuzzles()
-  if (b && b.dataset.act?.startsWith('t') && S.training && ['texit', 'tagain', 'tnext', 'thint', 'treveal', 'tdel', 'tline'].includes(b.dataset.act)) return trainAction(b.dataset.act)
+  if (b && b.dataset.act?.startsWith('t') && S.training && ['texit', 'tagain', 'tnext', 'thint', 'treveal', 'tdel', 'tline', 'tgame'].includes(b.dataset.act)) return trainAction(b.dataset.act)
   if (b && S.mode?.type === 'explore') {
     const act = b.dataset.act, v = S.mode
     if (act === 'xbest') { const u = anFor(v.fens[v.i])?.lines?.[0]?.pv?.[0]; if (u) exploreMove(u); return }
@@ -1090,6 +1096,14 @@ function renderAcct() {
 }
 
 // Home: card "Meus desafios" (needs Google login when login is available)
+function puzzlePrompt(p) {
+  const side = p.color === 'w' ? 'Brancas' : 'Pretas'
+  if (p.type === 'chance') {
+    const opp = p.oppSan || (/jogar (\S+)\. Ache/.exec(p.prompt || '') || [])[1]
+    return opp ? `O adversário acabou de jogar ${opp}. Ache a punição!` : `Vez das ${side}. Ache a punição!`
+  }
+  return `Vez das ${side}. Ache o melhor lance.`
+}
 function puzzleTitle(p) {
   const n = +(p.fen.split(' ')[5] || 1)
   if (p.type === 'chance') {
@@ -1097,7 +1111,7 @@ function puzzleTitle(p) {
     const no = p.color === 'w' ? `${n - 1}...` : `${n}.`
     return opp ? `${no} ${opp}: ache a punição` : 'Ache a punição'
   }
-  return `${n}${p.color === 'w' ? '.' : '...'} ${p.played}: ache um lance melhor`
+  return `Lance ${n} (${p.color === 'w' ? 'Brancas' : 'Pretas'}): ache o melhor lance`
 }
 function puzzleWhen(p, now = Date.now()) {
   const d = Math.ceil(((p.due || 0) - now) / P.DAY)
@@ -1105,6 +1119,7 @@ function puzzleWhen(p, now = Date.now()) {
 }
 function renderHome() {
   renderStats()
+  if (S.tab === 'recent') renderRecent()
   const el = $('#chal'); if (!el) return
   const head = `<div class="ch-head">${TARGET}<h2>Meus desafios</h2></div>`
   const needLogin = G.available() && !S.account
@@ -1231,7 +1246,17 @@ async function analyzeGame(pgn, side, opt, engines, alive, onPos) {
   return { game, sf: sfx, threats, infos, cls, side, pgn, clock: R.clockData(game, pgn) }
 }
 
-function libSettings() { return { user: '', site: 'chesscom', count: 10, gen: true, ...store.get('lib', {}) } }
+// Configurações (jogador, site...) ficam no store, que vai pro Google Drive junto com os desafios.
+function libSettings() { return { user: '', site: 'chesscom', count: 10, gen: true, ...store.get('lib', {}), ...(S.store?.profile || {}) } }
+function setLib(patch) {
+  const cur = libSettings()
+  if (Object.keys(patch).every((k) => cur[k] === patch[k])) return // nada mudou (ex.: change disparado no blur)
+  const next = { ...cur, ...patch, updatedAt: Date.now() }
+  delete next.v
+  store.set('lib', next) // cópia local (pré-login / migração)
+  if (S.store) { S.store.profile = next; S.store.updatedAt = next.updatedAt; changed() }
+  if (('user' in patch && patch.user !== cur.user) || ('site' in patch && patch.site !== cur.site)) S.recent = null
+}
 let batchEngines = []
 function stopBatchEngines() { for (const e of batchEngines) e.w.terminate(); batchEngines = [] }
 function cancelBatch(msg) {
@@ -1333,13 +1358,15 @@ function renderBatchUi(light) {
 }
 function toggleSettings(force) {
   const el = $('#settings')
+  const was = el.hidden
   el.hidden = force === undefined ? !el.hidden : !force
-  if (!el.hidden) { const u = libSettings(); if (!u.user && $('#user').value.trim()) store.set('lib', { ...u, user: $('#user').value.trim() }); renderSettings() }
+  if (el.hidden && !was && S.tab === 'recent' && !$('#recentPane').hidden) { if (!S.recent && libSettings().user) loadRecent(20); else renderRecent() }
+  if (!el.hidden) { const u = libSettings(); if (!u.user && $('#user').value.trim()) setLib({ user: $('#user').value.trim() }); renderSettings() }
 }
 function onSettings(e) {
   const cfg = libSettings()
   const site = e.target.closest('[data-site]')
-  if (site) { store.set('lib', { ...cfg, site: site.dataset.site }); return renderSettings() }
+  if (site) { setLib({ site: site.dataset.site }); return renderSettings() }
   const b = e.target.closest('[data-lib]'); if (!b) return
   if (b.dataset.lib === 'cancel') return cancelBatch()
   if (b.dataset.lib === 'run') {
@@ -1349,9 +1376,9 @@ function onSettings(e) {
 }
 function onSettingsInput(e) {
   const cfg = libSettings()
-  if (e.target.id === 'sUser') store.set('lib', { ...cfg, user: e.target.value.trim() })
-  else if (e.target.id === 'sCount') { store.set('lib', { ...cfg, count: +e.target.value }); renderSettings() }
-  else if (e.target.id === 'sGen') store.set('lib', { ...cfg, gen: e.target.checked })
+  if (e.target.id === 'sUser') setLib({ user: e.target.value.trim() })
+  else if (e.target.id === 'sCount') { setLib({ count: +e.target.value }); renderSettings() }
+  else if (e.target.id === 'sGen') setLib({ gen: e.target.checked })
   else if (e.target.id === 'sDepth') renderSettings()
 }
 
@@ -1385,14 +1412,89 @@ function onStatsClick(e) {
   const li = e.target.closest('[data-game]'); if (!li) return
   openStoredGame(li.dataset.game)
 }
-function openStoredGame(id) {
+// Abre a partida guardada; com um desafio, já pula pro momento dele.
+async function openStoredGame(id, puzzle) {
   const g = S.store?.games?.[id]; if (!g?.pgn) return false
   if (S.training) { S.training = null; S.trainMode = null; S.mode = null; S.reviewSnapshot = null; document.body.classList.remove('training') }
   $('#pgn').value = g.pgn
   updateDetect()
   S.pick = g.side
-  start()
+  await start()
+  if (puzzle && S.game) {
+    const key = (f) => f.split(' ').slice(0, 4).join(' ')
+    let k = Number.isInteger(puzzle.ply) && S.game.positions[puzzle.ply] && key(S.game.positions[puzzle.ply]) === key(puzzle.fen) ? puzzle.ply : S.game.positions.findIndex((f) => key(f) === key(puzzle.fen))
+    if (k >= 0) go(k)
+  }
   return true
+}
+
+// ── Aba "Minhas partidas" no card de revisar ────────────────────────────────
+function setTab(t) {
+  S.tab = t
+  for (const b of document.querySelectorAll('.tab')) { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on) }
+  $('#pastePane').hidden = t !== 'paste'
+  $('#recentPane').hidden = t !== 'recent'
+  if (t === 'recent') { renderRecent(); if (!S.recent && libSettings().user) loadRecent(20) }
+}
+async function loadRecent(n) {
+  const cfg = libSettings()
+  const R0 = S.recent = { key: cfg.site + ':' + cfg.user.toLowerCase(), n, loading: true, list: S.recent?.list || [] }
+  renderRecent()
+  try {
+    const list = await L.fetchRecent(cfg.site, cfg.user, n)
+    if (S.recent !== R0) return
+    R0.list = list.map(({ pgn }) => { const h = R.gameSummary(pgn); return { pgn, h, id: L.gameId(h, pgn), side: L.sideFor(h, cfg.user) } }).filter((g) => g.side)
+    R0.more = list.length >= n
+  } catch (e) {
+    if (S.recent !== R0) return
+    R0.error = e instanceof TypeError ? `Não consegui falar com o ${L.SITES[cfg.site]} (o navegador bloqueou a conexão; no claude.ai isso não funciona, só na versão do GitHub Pages).` : 'Não consegui buscar as partidas: ' + e.message
+  }
+  R0.loading = false
+  renderRecent()
+}
+function renderRecent() {
+  const el = $('#recentPane'); if (!el || el.hidden) return
+  const cfg = libSettings()
+  if (!cfg.user) {
+    el.innerHTML = `<div class="ch-empty"><p class="t">Qual é o seu usuário?</p><p class="ch-p">Configure seu usuário do chess.com ou do Lichess no ⚙ e as suas partidas recentes aparecem aqui pra revisar com um clique.${S.account ? ' Fica salvo na sua conta do Google.' : ''}</p><button class="btn big green" data-rc="cfg">Configurar usuário</button></div>`
+    return
+  }
+  if (S.recent && S.recent.key !== cfg.site + ':' + cfg.user.toLowerCase()) S.recent = null
+  const R0 = S.recent
+  if (!R0) {
+    el.innerHTML = `<div class="rhead"><span>♟ <b>${esc(cfg.user)}</b> no ${L.SITES[cfg.site]}</span><button class="linkbtn" data-rc="cfg">trocar</button></div><button class="btn big green" data-rc="reload">Buscar minhas partidas</button>`
+    return
+  }
+  let html = `<div class="rhead"><span>♟ <b>${esc(cfg.user)}</b> no ${L.SITES[cfg.site]}</span><button class="linkbtn" data-rc="cfg">trocar</button><span class="grow"></span><button class="btn act" data-rc="reload" ${R0?.loading ? 'disabled' : ''}>${R0?.loading ? 'Buscando…' : '↻ Atualizar'}</button></div>`
+  if (R0?.error) html += `<p class="ch-note" style="color:#ff8a7a">${esc(R0.error)}</p>`
+  const list = R0?.list || []
+  if (!list.length && R0?.loading) html += `<p class="ch-note">Buscando suas partidas…</p>`
+  else if (!list.length && !R0?.error) html += `<p class="ch-note">Não achei partidas recentes desse usuário.</p>`
+  if (list.length) {
+    html += `<ul class="rlist">` + list.map((g, i) => {
+      const h = g.h, sc = L.scoreFor({ result: h.Result, side: g.side })
+      const opp = g.side === 'w' ? h.Black : h.White, oppElo = g.side === 'w' ? h.BlackElo : h.WhiteElo
+      const done = S.store?.games?.[g.id]
+      const date = fmtDate(h.UTCDate || h.Date)
+      return `<li data-ri="${i}" title="Revisar essa partida"><span class="gres ${sc === 1 ? 'w' : sc === 0 ? 'l' : 'd'}">${sc === 1 ? 'V' : sc === 0 ? 'D' : sc === 0.5 ? 'E' : '?'}</span><span class="who">vs ${esc(opp || '?')}${oppElo ? ` <span class="muted">(${esc(oppElo)})</span>` : ''}</span><span class="tagz">${done ? `<span class="done" title="Já analisada">✓ ${(done.errors || []).length} erro${(done.errors || []).length === 1 ? '' : 's'}${done.accuracy != null ? ' · ' + done.accuracy.toFixed(0) + '%' : ''}</span>` : ''}</span><span class="meta">${g.side === 'w' ? '♔ Brancas' : '♚ Pretas'}${L.tcLabel(h.TimeControl) ? ' · ' + esc(L.tcLabel(h.TimeControl)) : ''}${date ? ' · ' + esc(date) : ''}</span></li>`
+    }).join('') + `</ul>`
+    if (R0.more && !R0.loading) html += `<button class="linkbtn" data-rc="more" style="margin-top:8px">Carregar mais partidas</button>`
+  }
+  el.innerHTML = html
+}
+function onRecentClick(e) {
+  const b = e.target.closest('[data-rc]')
+  if (b) {
+    if (b.dataset.rc === 'cfg') return toggleSettings(true)
+    if (b.dataset.rc === 'reload') { S.recent = null; return loadRecent(20) }
+    if (b.dataset.rc === 'more') return loadRecent((S.recent?.n || 20) + 20)
+  }
+  const li = e.target.closest('[data-ri]'); if (!li) return
+  const g = S.recent?.list?.[+li.dataset.ri]; if (!g) return
+  $('#pgn').value = g.pgn
+  updateDetect()
+  S.pick = g.side
+  start()
 }
 
 // Training session
@@ -1402,7 +1504,7 @@ function startTraining(first) {
   const due = P.dueList(S.store)
   const all = Object.values(S.store.puzzles)
   if (!all.length) { alertBox('Você ainda não tem desafios salvos. Revise uma partida e clique em "💾 Salvar desafios".'); return }
-  let queue = (due.length ? due : all.sort(() => Math.random() - 0.5)).slice(0, 15).map((p) => p.id)
+  let queue = P.shuffleSpread(due.length ? due : all).slice(0, 15).map((p) => p.id)
   if (first?.length) queue = [...first, ...queue.filter((id) => !first.includes(id))]
   if (!S.training && S.game) S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
   stopAuto(); stopTimer()
@@ -1418,9 +1520,8 @@ function openPuzzle() {
   if (!p) return finishTraining()
   const flip = p.color === 'b'
   Object.assign(S, { game: { headers: { White: p.game.white, Black: p.game.black }, plies: [], positions: [p.fen] }, sf: [], threats: [], infos: [], cls: [], maia: [], vars: [], anCache: {}, idx: 0, side: p.color, flip, clock: null, guide: false })
-  let played = null
-  try { const m = new Chess(p.fen).move(p.played); played = m.from + m.to } catch {}
-  S.trainMode = { type: 'puzzle', p, fen: p.fen, k: 0, sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, clean: true, played, last: p.last || null, prevFen: p.prevFen || null }
+  // desafio é puzzle: não mostra o lance que você jogou na partida
+  S.trainMode = { type: 'puzzle', p, fen: p.fen, k: 0, sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, clean: true, played: null, last: p.last || null, prevFen: p.prevFen || null }
   S.mode = S.trainMode
   render()
 }
@@ -1452,11 +1553,11 @@ async function tryPuzzle(uci) {
     changed(); render()
   }
   if (uci.slice(0, 4) === p.best.slice(0, 4)) return solve(`Isso! ${mv.san}${p.idea ? ': ' + p.idea : ''}.`)
-  M.msg = `Conferindo ${mv.san}…`; render()
+  M.msg = `Conferindo ${mv.san}…`; M.pending = uci; render()
   try {
     const an = ch.isGameOver() ? { lines: [] } : await getStockfish().u.analyse(ch.fen(), { depth: 14, movetime: 1200 })
     if (S.mode !== M) return
-    const fb = R.attemptFeedback(M.fen, uci, an, p.color, p.wpBefore)
+    const fb = R.attemptFeedback(M.fen, uci, an, p.color, p.wpBefore, { pv: p.pv })
     if (fb && fb.ok) return solve(`Boa! ${fb.text} A solução era ${p.bestSan}.`)
     Object.assign(M, { busy: false, ok: false, wrong: uci, msg: (fb ? fb.text : `${mv.san} não é o melhor.`) + (M.tries >= 2 && !M.hint ? ' Quer uma dica?' : '') })
     M.clean = false
@@ -1473,9 +1574,9 @@ function renderPuzzlePanel(box) {
   const st = P.stats(S.store)
   const g = p.game
   let srcHtml = ''
-  let html = `<div class="coach-head"><div class="avatar">🎯</div><div><b>Desafio ${T.pos + 1} de ${T.queue.length}</b>${T.extra ? ' <span class="tag">treino extra</span>' : ''}<div class="sub">${esc(g.white)} x ${esc(g.black)}${g.date ? ' · ' + esc(g.date) : ''} · você joga de ${p.color === 'w' ? 'Brancas' : 'Pretas'} · ${st.due} pra revisar · ${st.learned}/${st.total} aprendidos${M.played && !M.wrong && !M.solved ? ' · <span style="color:#ff8a7a">seta vermelha: o lance da partida</span>' : ''}</div></div></div>`
+  let html = `<div class="coach-head"><div class="avatar">🎯</div><div><b>Desafio ${T.pos + 1} de ${T.queue.length}</b>${T.extra ? ' <span class="tag">treino extra</span>' : ''}<div class="sub">${esc(g.white)} x ${esc(g.black)}${fmtDate(g.date) ? ' · ' + esc(fmtDate(g.date)) : ''} · você joga de ${p.color === 'w' ? 'Brancas' : 'Pretas'} · ${st.due} pra revisar · ${st.learned}/${st.total} aprendidos</div></div></div>`
   if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
-  else html += `<p class="say">${linkify(p.prompt, [M.fen, p.prevFen])}</p>`
+  else html += `<p class="say">${linkify(puzzlePrompt(p), [M.fen, p.prevFen])}</p>`
   html += `<div class="acts">`
   if (!M.solved) {
     if (!M.hint) html += `<button class="btn act" data-act="thint">💡 Dica</button>`
@@ -1485,10 +1586,10 @@ function renderPuzzlePanel(box) {
   }
   if (M.solved) {
     const n = +(p.fen.split(' ')[5] || 1)
-    const lance = p.played ? `${n}${p.color === 'w' ? '.' : '...'} ${p.played}` : ''
+    const lance = `${n} (${p.color === 'w' ? 'Brancas' : 'Pretas'})`
     const link = /^https?:\/\//.test(g.link || '') ? g.link : ''
     const stored = g.id && S.store.games?.[g.id]?.pgn
-    srcHtml = `<div class="src">♟ Esse desafio veio da partida <b>${esc(g.white)} x ${esc(g.black)}</b>${fmtDate(g.date) ? ' · ' + esc(fmtDate(g.date)) : ''}${g.result ? ' · ' + esc(g.result) : ''}${lance ? ` · lance ${esc(lance)}` : ''}.${link ? ` <a href="${esc(link)}" target="_blank" rel="noopener" style="color:#9cc76a">Abrir no ${/lichess/.test(link) ? 'Lichess' : 'chess.com'} ↗</a>` : ''}${stored ? ` <button class="linkbtn" data-act="tgame">Revisar essa partida</button>` : ''}</div>`
+    srcHtml = `<div class="src">♟ Esse desafio veio da partida <b>${esc(g.white)} x ${esc(g.black)}</b>${fmtDate(g.date) ? ' · ' + esc(fmtDate(g.date)) : ''}${g.result ? ' · ' + esc(g.result) : ''}${lance ? ` · lance ${esc(lance)}` : ''}.${link ? ` <a href="${esc(link)}" target="_blank" rel="noopener" style="color:#9cc76a">Abrir no ${/lichess/.test(link) ? 'Lichess' : 'chess.com'} ↗</a>` : ''}</div>${stored ? `<div class="acts"><button class="btn act retry" data-act="tgame">♟ Ver esse momento na partida</button></div>` : ''}`
   }
   html += `<button class="btn act" data-act="tdel" title="Remover este desafio">🗑</button><button class="btn act" data-act="texit">Sair do treino</button></div>`
   box.innerHTML = html + srcHtml
@@ -1496,7 +1597,7 @@ function renderPuzzlePanel(box) {
 function trainAction(act) {
   const M = S.trainMode, T = S.training
   if (act === 'texit') return exitTraining()
-  if (act === 'tgame') return openStoredGame(M.p.game.id)
+  if (act === 'tgame') return openStoredGame(M.p.game.id, M.p)
   if (act === 'tagain') { S.training = null; return startTraining() }
   if (act === 'tnext') { T.pos++; return T.pos < T.queue.length ? openPuzzle() : finishTraining() }
   if (act === 'thint') { M.hint = M.p.best.slice(0, 2); M.clean = false; M.msg = `Dica: a peça certa está em ${M.hint}.`; M.ok = null; return render() }
@@ -1660,6 +1761,7 @@ function init() {
   initSetup()
   S.account = store.get('account', null)
   loadLocal()
+  if (!S.store.profile && store.get('lib', null)?.user) S.store.profile = { ...store.get('lib', {}), updatedAt: store.get('lib', {}).updatedAt || 1 }
   $('#trainBtn').onclick = () => (S.training ? exitTraining() : startTraining())
   $('#acct').onclick = (e) => { const b = e.target.closest('[data-acct]'); if (!b) return; b.dataset.acct === 'in' ? googleLogin() : googleLogout() }
   $('#gear').onclick = (e) => { e.stopPropagation(); toggleSettings() }
@@ -1668,6 +1770,8 @@ function init() {
   $('#settings').addEventListener('input', onSettingsInput)
   $('#settings').addEventListener('change', onSettingsInput)
   $('#stats').onclick = onStatsClick
+  for (const b of document.querySelectorAll('.tab')) b.onclick = () => setTab(b.dataset.tab)
+  $('#recentPane').onclick = onRecentClick
   document.addEventListener('pointerdown', (e) => { if (!$('#settings').hidden && !e.target.closest('#settings,#gear,#batchBadge,.hint')) toggleSettings(false) })
   // Sessão: conta fica lembrada até clicar em Sair. Se o token venceu, renova
   // sozinho no primeiro clique (o Google exige um clique pra abrir o popup).
