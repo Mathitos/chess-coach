@@ -2,6 +2,8 @@ import { Chess } from 'chess.js'
 import { Uci } from './uci.js'
 import * as R from './review.js'
 import PIECES from './pieces.gen.js'
+import * as P from './puzzles.js'
+import * as G from './gdrive.js'
 
 const $ = (s) => document.querySelector(s)
 const store = {
@@ -92,7 +94,7 @@ function initSetup() {
   })
   $('#detect').addEventListener('change', (e) => { if (e.target.id === 'gamePick') { S.gameIdx = +e.target.value; S.pick = null; updateDetect() } })
   updateDetect()
-  $('#newGame').onclick = () => { S.runId++; resetStockfish(); show('setup') }
+  $('#newGame').onclick = () => { if (S.training) { S.training = null; S.trainMode = null; S.mode = null; document.body.classList.remove('training') } S.runId++; resetStockfish(); show('setup') }
 }
 
 // ── Input detection (PGN / multi-game PGN / link / FEN) ─────────────────────
@@ -383,7 +385,7 @@ function boardViewBase() {
     else if (nxt) v.arrows.push([nxt.from, nxt.to, 'rgba(116,176,224,.75)', 10])
     return addHover(v)
   }
-  if (M && M.type === 'retry') {
+  if (M && (M.type === 'retry' || M.type === 'puzzle')) {
     const v = { fen: M.fen, last: null, arrows: [], sel: M.sel, dots: [], marks: [] }
     if (M.sel) v.dots = new Chess(M.fen).moves({ square: M.sel, verbose: true }).map((m) => m.to)
     if (M.hint) v.marks.push([M.hint, 'rgba(129,182,76,.55)'])
@@ -443,7 +445,7 @@ function renderBoard() {
     const [x, y] = sqXY(sq, flip)
     svg += `<g transform="translate(${Math.min(x + 78, 772)},${Math.max(y + 2, 22)})"><circle r="22" fill="${C.color}" stroke="#fff" stroke-width="3"/><text y="8" text-anchor="middle" font-size="${C.sym.length > 1 ? 20 : 24}" font-weight="800" fill="#fff">${C.sym}</text></g>`
   }
-  $('#board').classList.toggle('play', !(S.mode && S.mode.type === 'retry' && (S.mode.solved || S.mode.busy)))
+  $('#board').classList.toggle('play', !(S.mode && (S.mode.type === 'retry' || S.mode.type === 'puzzle') && (S.mode.solved || S.mode.busy)))
   $('#board').innerHTML = `<svg viewBox="0 0 800 800"><defs><radialGradient id="chk"><stop offset="0" stop-color="#ff2b2b"/><stop offset="1" stop-color="#ff2b2b" stop-opacity="0"/></radialGradient></defs>${svg}</svg>`
   // eval bar
   const info = V.info !== undefined ? V.info : S.infos[i]
@@ -586,7 +588,7 @@ function lineAutoplay() {
   }, 1500)
 }
 function stopTimer() { if (S.mode?.timer) { clearInterval(S.mode.timer); S.mode.timer = null } }
-function exitMode() { stopTimer(); S.mode = null; render() }
+function exitMode() { stopTimer(); S.mode = S.training && S.trainMode ? S.trainMode : null; render() }
 function lineStep(d) { const M = S.mode; stopTimer(); M.playing = false; M.i = Math.max(0, Math.min(M.moves.length, M.i + d)); render() }
 
 function startRetry(k, prompt) {
@@ -630,14 +632,14 @@ function squareAt(e) {
 // Position the board is showing right now (any mode).
 function shownFen() {
   const M = S.mode
-  if (M && M.type === 'retry') return M.fen
+  if (M && (M.type === 'retry' || M.type === 'puzzle')) return M.fen
   if (M && (M.type === 'explore' || M.type === 'line')) return M.fens[M.i]
   return S.game.positions[S.idx]
 }
 // Position the user can move in (null = not interactive right now).
 function interactiveFen() {
   const M = S.mode
-  if (M && M.type === 'retry') return M.solved || M.busy ? null : M.fen
+  if (M && (M.type === 'retry' || M.type === 'puzzle')) return M.solved || M.busy ? null : M.fen
   return shownFen()
 }
 function selOwner() { return S.mode && S.mode.type !== 'line' ? S.mode : S }
@@ -649,6 +651,7 @@ function userMove(uci) {
   const M = S.mode
   S.sel = null
   if (M && M.type === 'retry') return tryMove(uci)
+  if (M && M.type === 'puzzle') return tryPuzzle(uci)
   if (M && M.type === 'explore') return exploreMove(uci)
   if (M && M.type === 'line') { stopTimer(); return branchFrom(M.k, M.moves.slice(0, M.i), uci) }
   // main line: same move as the game just advances; otherwise branch
@@ -850,13 +853,14 @@ function renderExplorePanel(box) {
 
 function renderModePanel(box) {
   if (S.mode.type === 'explore') return renderExplorePanel(box)
+  if (S.mode.type === 'puzzle') return renderPuzzlePanel(box)
   const M = S.mode, g = S.game
-  const p = g.plies[M.k]
-  const moveLbl = `${Math.floor(M.k / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}`
+  const p = M.k != null ? g.plies[M.k] : null
+  const moveLbl = p ? `${Math.floor(M.k / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}` : (M.fromLabel || 'a posição do desafio')
   if (M.type === 'line') {
     let seq = ''
     M.moves.forEach((m, j) => {
-      const ply = M.k + j
+      const ply = (M.plyBase ?? M.k) + j
       const num = ply % 2 === 0 ? `${Math.floor(ply / 2) + 1}. ` : j === 0 ? `${Math.floor(ply / 2) + 1}... ` : ''
       seq += `${num}<span class="lm${j + 1 === M.i ? ' cur' : ''}${M.kind === 'punish' && j === 0 ? ' played' : ''}" data-j="${j + 1}">${esc(m.san)}</span> `
     })
@@ -892,6 +896,8 @@ function onCoachAction(e) {
   const b = e.target.closest('[data-act]')
   const lm = e.target.closest('.lm')
   if (b && ['gstart', 'gauto', 'gskip', 'gnext', 'gprev', 'gstop'].includes(b.dataset.act)) return guideAction(b.dataset.act)
+  if (b && b.dataset.act === 'gsave') return savePuzzles()
+  if (b && b.dataset.act?.startsWith('t') && S.training && ['texit', 'tagain', 'tnext', 'thint', 'treveal', 'tdel', 'tline'].includes(b.dataset.act)) return trainAction(b.dataset.act)
   if (b && S.mode?.type === 'explore') {
     const act = b.dataset.act, v = S.mode
     if (act === 'xbest') { const u = anFor(v.fens[v.i])?.lines?.[0]?.pv?.[0]; if (u) exploreMove(u); return }
@@ -991,9 +997,191 @@ function renderGuide() {
     html += `<button class="btn act" data-act="gskip" title="Pular direto pro próximo momento">⏭ momento</button>`
   }
   if (S.guide) html += `<button class="btn act" data-act="gstop">✕ Sair da guiada</button>`
+  const nPz = ready ? ms.filter((m) => m.type === 'erro' || m.type === 'chance').length : 0
+  if (nPz) html += S.savedMsg && S.savedFor === S.game ? `<span class="muted sm">${esc(S.savedMsg)}</span>` : `<button class="btn act ghost" data-act="gsave" title="Seus erros e as chances de punir viram desafios pra treinar depois">💾 Salvar ${nPz} desafio${nPz > 1 ? 's' : ''}</button>`
   html += `</div>`
-  el.innerHTML = ready || S.guide ? html : ''
+  el.innerHTML = (ready || S.guide) && !S.training ? html : ''
   el.hidden = !(ready || S.guide)
+}
+
+// ── Saved challenges (desafios), training and Google Drive sync ─────────────
+function localKey() { return 'puzzles.' + (S.account?.email || 'local') }
+function loadLocal() { S.store = P.mergeStores(P.emptyStore(), store.get(localKey(), null)) }
+function saveLocal() { store.set(localKey(), S.store) }
+let syncT = null
+function changed() { saveLocal(); renderAcct(); clearTimeout(syncT); syncT = setTimeout(syncDrive, 800) }
+async function syncDrive() {
+  if (!G.signedIn()) return
+  S.syncMsg = 'sincronizando…'; renderAcct()
+  try {
+    const remote = await G.load()
+    S.store = P.mergeStores(S.store, remote)
+    saveLocal()
+    await G.save(S.store)
+    S.syncMsg = 'salvo no Drive ✓'
+  } catch (e) { S.syncMsg = 'erro ao sincronizar: ' + e.message }
+  renderAcct()
+}
+async function googleLogin() {
+  try {
+    await G.signIn(S.account?.email)
+    const u = await G.userInfo()
+    const anon = store.get('puzzles.local', null)
+    S.account = { email: u.email, name: u.given_name || u.name || u.email }
+    store.set('account', S.account)
+    loadLocal()
+    if (anon) { S.store = P.mergeStores(S.store, anon); store.set('puzzles.local', null) } // adota desafios salvos antes do login
+    saveLocal()
+    await syncDrive()
+  } catch (e) { S.syncMsg = 'login: ' + e.message; renderAcct() }
+}
+function googleLogout() {
+  G.signOut(); S.account = null; store.set('account', null); S.syncMsg = null
+  loadLocal(); renderAcct()
+}
+function renderAcct() {
+  const el = $('#acct'); if (!el) return
+  const st = P.stats(S.store || P.emptyStore())
+  $('#trainBtn').innerHTML = `🎯 Treinar${st.due ? ` <span class="pill">${st.due}</span>` : st.total ? ` <span class="pill muted">${st.total}</span>` : ''}`
+  if (!G.available()) { el.innerHTML = ''; return }
+  const msg = S.syncMsg ? `<span class="muted sm">${esc(S.syncMsg)}</span>` : ''
+  if (G.signedIn()) el.innerHTML = `${msg}<span class="who" title="${esc(S.account?.email || '')}">☁️ ${esc(S.account?.name || '')}</span><button class="btn" data-acct="out">Sair</button>`
+  else if (S.account) el.innerHTML = `${msg}<button class="btn" data-acct="in" title="Reconectar pra sincronizar com o Drive">☁️ Conectar ${esc(S.account.name)}</button>`
+  else el.innerHTML = `${msg}<button class="btn" data-acct="in">Entrar com Google</button>`
+}
+
+function makePuzzles() {
+  const g = S.game, h = g.headers, out = []
+  for (const m of keyMoments()) {
+    if (m.type !== 'erro' && m.type !== 'chance') continue
+    const kt = m.type === 'erro' ? m.k : m.k + 1
+    const line = S.sf[kt]?.lines?.[0], info = S.infos[kt]
+    if (!line || !line.pv.length || !info) continue
+    const fen = g.positions[kt], color = g.plies[kt].color
+    const motif = R.lineMotif(fen, line, color)
+    out.push({
+      id: P.puzzleId(fen, line.pv[0]), fen, best: line.pv[0], bestSan: motif.san, pv: line.pv.slice(0, 8), color,
+      wpBefore: color === 'w' ? info.wpW : 100 - info.wpW, type: m.type,
+      idea: R.explainBestMove(fen, line, color, motif, S.threats[kt]),
+      prompt: m.type === 'erro' ? `Na partida você jogou ${g.plies[kt].san} aqui (${R.CLASSES[S.cls[kt].cls].label.toLowerCase()}). Ache um lance melhor.` : `O adversário acabou de jogar ${g.plies[m.k].san}. Ache a punição!`,
+      played: g.plies[kt].san,
+      game: { white: h.White || '', black: h.Black || '', date: h.Date || '', result: h.Result || '', link: h.Link || h.Site || '' },
+    })
+  }
+  return out
+}
+function savePuzzles() {
+  const list = makePuzzles()
+  const n = P.addPuzzles(S.store, list)
+  S.savedFor = S.game
+  S.savedMsg = n ? `${n} desafio${n > 1 ? 's' : ''} salvo${n > 1 ? 's' : ''} ✓` : 'esses desafios já estavam salvos ✓'
+  changed(); renderGuide()
+}
+
+// Training session
+const REVIEW_KEYS = ['game', 'sf', 'threats', 'infos', 'cls', 'maia', 'maiaRaw', 'idx', 'side', 'flip', 'clock', 'vars', 'anCache', 'maiaElo', 'guide']
+function startTraining() {
+  const due = P.dueList(S.store)
+  const all = Object.values(S.store.puzzles)
+  if (!all.length) { alertBox('Você ainda não tem desafios salvos. Revise uma partida e clique em "💾 Salvar desafios".'); return }
+  const queue = (due.length ? due : all.sort(() => Math.random() - 0.5)).slice(0, 15).map((p) => p.id)
+  if (!S.training && S.game) S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
+  stopAuto(); stopTimer()
+  S.training = { queue, pos: 0, extra: !due.length, done: 0, ok: 0 }
+  document.body.classList.add('training')
+  show('review')
+  openPuzzle()
+}
+function alertBox(msg) { S.syncMsg = msg; renderAcct(); setTimeout(() => { if (S.syncMsg === msg) { S.syncMsg = null; renderAcct() } }, 6000) }
+function openPuzzle() {
+  const T = S.training
+  const p = S.store.puzzles[T.queue[T.pos]]
+  if (!p) return finishTraining()
+  const flip = p.color === 'b'
+  Object.assign(S, { game: { headers: { White: p.game.white, Black: p.game.black }, plies: [], positions: [p.fen] }, sf: [], threats: [], infos: [], cls: [], maia: [], vars: [], anCache: {}, idx: 0, side: p.color, flip, clock: null, guide: false })
+  S.trainMode = { type: 'puzzle', p, fen: p.fen, k: 0, sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, clean: true }
+  S.mode = S.trainMode
+  render()
+}
+function finishTraining() {
+  const T = S.training
+  S.trainMode = { type: 'puzzle', p: null, done: true, fen: S.game?.positions?.[0] || new Chess().fen(), k: 0 }
+  S.mode = S.trainMode
+  render()
+  T.finished = true
+}
+function exitTraining() {
+  S.training = null; S.trainMode = null; S.mode = null
+  document.body.classList.remove('training')
+  if (S.reviewSnapshot) { Object.assign(S, S.reviewSnapshot); S.reviewSnapshot = null; show('review'); buildMoveList(); render() }
+  else show('setup')
+  renderAcct()
+}
+async function tryPuzzle(uci) {
+  const M = S.mode, p = M.p
+  M.busy = true; M.tries++; M.sel = null; M.wrong = null
+  const ch = new Chess(M.fen)
+  let mv
+  try { mv = ch.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { M.busy = false; return render() }
+  const solve = (text) => {
+    const first = M.clean && M.tries === 1
+    Object.assign(M, { busy: false, ok: true, solved: uci, msg: text })
+    P.recordResult(S.store, p.id, first)
+    S.training.done++; if (first) S.training.ok++
+    changed(); render()
+  }
+  if (uci.slice(0, 4) === p.best.slice(0, 4)) return solve(`Isso! ${mv.san}${p.idea ? ': ' + p.idea : ''}.`)
+  M.msg = `Conferindo ${mv.san}…`; render()
+  try {
+    const an = ch.isGameOver() ? { lines: [] } : await getStockfish().u.analyse(ch.fen(), { depth: 14, movetime: 1200 })
+    if (S.mode !== M) return
+    const fb = R.attemptFeedback(M.fen, uci, an, p.color, p.wpBefore)
+    if (fb && fb.ok) return solve(`Boa! ${fb.text} A solução era ${p.bestSan}.`)
+    Object.assign(M, { busy: false, ok: false, wrong: uci, msg: (fb ? fb.text : `${mv.san} não é o melhor.`) + (M.tries >= 2 && !M.hint ? ' Quer uma dica?' : '') })
+    M.clean = false
+  } catch (e) { M.busy = false; M.msg = 'Não consegui conferir: ' + e.message }
+  render()
+}
+function renderPuzzlePanel(box) {
+  const M = S.mode, T = S.training
+  if (M.done || !M.p) {
+    box.innerHTML = `<div class="coach-head"><div class="avatar">🏁</div><div><b>Treino concluído</b><div class="sub">${T.ok} de ${T.done} de primeira</div></div></div><p class="say">${P.stats(S.store).due ? `Ainda tem ${P.stats(S.store).due} desafio(s) pra revisar.` : 'Nada mais pra revisar agora. Os desafios voltam no dia certo pra fixar.'}</p><div class="acts">${P.stats(S.store).due ? '<button class="btn act retry" data-act="tagain">Continuar treinando</button>' : ''}<button class="btn act" data-act="texit">Sair do treino</button></div>`
+    return
+  }
+  const p = M.p
+  const st = P.stats(S.store)
+  const g = p.game
+  let html = `<div class="coach-head"><div class="avatar">🎯</div><div><b>Desafio ${T.pos + 1} de ${T.queue.length}</b>${T.extra ? ' <span class="tag">treino extra</span>' : ''}<div class="sub">${esc(g.white)} x ${esc(g.black)}${g.date ? ' · ' + esc(g.date) : ''} · você joga de ${p.color === 'w' ? 'Brancas' : 'Pretas'} · ${st.due} pra revisar · ${st.learned}/${st.total} aprendidos</div></div></div>`
+  if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
+  else html += `<p class="say">${esc(p.prompt)}</p>`
+  html += `<div class="acts">`
+  if (!M.solved) {
+    if (!M.hint) html += `<button class="btn act" data-act="thint">💡 Dica</button>`
+    html += `<button class="btn act" data-act="treveal">Mostrar resposta</button>`
+  } else {
+    html += `<button class="btn act retry" data-act="tnext">Próximo desafio ▶</button><button class="btn act" data-act="tline">▶ Explicar a linha</button>`
+  }
+  html += `<button class="btn act" data-act="tdel" title="Remover este desafio">🗑</button><button class="btn act" data-act="texit">Sair do treino</button></div>`
+  box.innerHTML = html
+}
+function trainAction(act) {
+  const M = S.trainMode, T = S.training
+  if (act === 'texit') return exitTraining()
+  if (act === 'tagain') { S.training = null; return startTraining() }
+  if (act === 'tnext') { T.pos++; return T.pos < T.queue.length ? openPuzzle() : finishTraining() }
+  if (act === 'thint') { M.hint = M.p.best.slice(0, 2); M.clean = false; M.msg = `Dica: a peça certa está em ${M.hint}.`; M.ok = null; return render() }
+  if (act === 'treveal') {
+    Object.assign(M, { solved: M.p.best, ok: null, wrong: null, sel: null, msg: `O lance era ${M.p.bestSan}${M.p.idea ? ': ' + M.p.idea : ''}.` })
+    P.recordResult(S.store, M.p.id, false); T.done++; changed(); return render()
+  }
+  if (act === 'tdel') { P.removePuzzle(S.store, M.p.id); changed(); T.queue.splice(T.pos, 1); return T.pos < T.queue.length ? openPuzzle() : finishTraining() }
+  if (act === 'tline') {
+    const p = M.p
+    const steps = R.explainLine(p.fen, p.pv, { side: p.color })
+    const [, turn, , , , full] = p.fen.split(' ')
+    S.mode = { type: 'line', k: null, plyBase: (+full - 1) * 2 + (turn === 'b' ? 1 : 0), kind: 'best', fens: [p.fen, ...steps.map((x) => x.fen)], moves: steps, steps, i: 0, label: `Explicando ${p.bestSan}`, playing: false, fromLabel: 'a posição do desafio' }
+    render()
+  }
 }
 
 // ── Move list / graph / summary ─────────────────────────────────────────────
@@ -1140,6 +1328,11 @@ function annotatedPgn() {
 // ── Wire up ─────────────────────────────────────────────────────────────────
 function init() {
   initSetup()
+  S.account = store.get('account', null)
+  loadLocal()
+  $('#trainBtn').onclick = () => (S.training ? exitTraining() : startTraining())
+  $('#acct').onclick = (e) => { const b = e.target.closest('[data-acct]'); if (!b) return; b.dataset.acct === 'in' ? googleLogin() : googleLogout() }
+  renderAcct()
   $('#first').onclick = () => go(0)
   $('#prev').onclick = () => navStep(-1)
   $('#next').onclick = () => navStep(1)

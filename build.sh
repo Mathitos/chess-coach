@@ -16,7 +16,7 @@ open('src/pieces.gen.js', 'w').write('export default ' + json.dumps(m))
 EOF
 
 # App (inlined into index.html) and Maia worker
-npx esbuild src/main.js --bundle --format=esm --minify --outfile=build/app.js --log-level=warning
+npx esbuild src/main.js --bundle --format=esm --minify --define:__GOOGLE_CLIENT_ID__="\"${GOOGLE_CLIENT_ID:-}\"" --outfile=build/app.js --log-level=warning
 npx esbuild src/maia-worker.js --bundle --format=iife --minify --define:import.meta.url=self.location.href --outfile=dist/maia-worker.js --log-level=warning
 python3 - <<'EOF'
 t = open('src/template.html').read()
@@ -36,7 +36,7 @@ if [ ! -f dist/maia3.part2.wasm ] || [ assets/maia3_simplified.onnx -nt dist/mai
 fi
 
 # Node bundles used by the tests
-for f in review uci maia-core; do
+for f in review uci maia-core puzzles; do
   npx esbuild src/$f.js --bundle --format=esm --platform=node --outfile=build/$f.node.mjs --log-level=warning
 done
 

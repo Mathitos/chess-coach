@@ -142,11 +142,15 @@ p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
 .btn.act.ghost{background:transparent;border:1px solid #4a4744}.btn.act.ghost.on{background:#2f3a47;border-color:#4a8fd6}
 .ref{border-bottom:1px dashed #4a8fd6;cursor:pointer;font-weight:600}.ref:hover{background:#2f3a47;border-radius:3px}
 p.say.step{min-height:48px;background:#2b2926;border-radius:8px;padding:10px 12px}
+#acct{display:flex;gap:8px;align-items:center}
+.who{font-weight:600}.sm{font-size:12px}
+.pill{background:#81b64c;color:#fff;border-radius:10px;padding:0 7px;font-size:12px;margin-left:4px}.pill.muted{background:#4a4744;color:#ddd}
+body.training #graph,body.training #moves,body.training #summary,body.training .status,body.training #guide,body.training #analyzing,body.training #players,body.training .toggles,body.training .navbar{display:none!important}
 @media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
 </style>
 </head>
 <body>
-<header><h1>♞ Coach de <span>Xadrez</span></h1><div class="grow"></div><button class="btn" id="newGame">Nova partida</button></header>
+<header><h1>♞ Coach de <span>Xadrez</span></h1><div class="grow"></div><span id="acct"></span><button class="btn" id="trainBtn">🎯 Treinar</button><button class="btn" id="newGame">Nova partida</button></header>
 <main>
 <section id="setup">
   <div class="card">

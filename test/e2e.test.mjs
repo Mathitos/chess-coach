@@ -178,6 +178,35 @@ describe('app', () => {
     assert.deepEqual(errors, [])
   })
 
+  test('salvar desafios e treinar (local, sem login)', { timeout: 300000 }, async () => {
+    const { page, errors } = await newPage()
+    assert.equal(await page.locator('#acct button').count(), 0) // sem client id do Google: sem botão de login
+    await page.fill('#pgn', read('game2.pgn'))
+    await page.click('.chip[data-side=w]')
+    await page.click('#go'); await waitDone(page)
+    await page.click('[data-act=gsave]')
+    assert.match(await page.textContent('#guide'), /salvo/)
+    assert.match(await page.textContent('#trainBtn'), /\d/)
+    await page.click('#trainBtn')
+    await page.waitForSelector('text=Desafio 1 de')
+    await page.click('[data-act=treveal]')
+    assert.match(await page.textContent('#coach'), /O lance era/)
+    await page.click('[data-act=tline]')
+    await page.click('[data-act=lnext]')
+    assert.match(await page.textContent('#coach .say.step'), /\w/)
+    await page.click('[data-act=exit]') // volta pro desafio
+    assert.match(await page.textContent('#coach'), /Desafio 1 de/)
+    await page.click('[data-act=tnext]')
+    assert.match(await page.textContent('#coach'), /Desafio 2 de/)
+    // persistiu no navegador
+    await page.reload()
+    assert.match(await page.textContent('#trainBtn'), /\d/)
+    await page.click('#trainBtn')
+    await page.waitForSelector('text=Desafio 1 de')
+    await page.click('[data-act=texit]')
+    assert.deepEqual(errors, [])
+  })
+
   test('várias partidas, lado das pretas e relógio', { timeout: 300000 }, async () => {
     const { page, errors } = await newPage()
     const clock = read('game-clock.pgn').replace('"matheus_anzzulin"', '"Fulano"').replace('"Ronkolan"', '"matheus_anzzulin"')
@@ -205,5 +234,57 @@ describe('app', () => {
     assert.match(await page.textContent('#coach'), /Posição colada/)
     assert.equal(await page.locator('.varrow').count(), 1)
     assert.deepEqual(errors, [])
+  })
+})
+
+describe('Google Drive (mock do Google)', () => {
+  test('login, cria o arquivo no appDataFolder e sincroniza', { timeout: 300000 }, async () => {
+    // build separado com client id de teste
+    const { execSync } = await import('node:child_process')
+    execSync('bash build.sh', { env: { ...process.env, GOOGLE_CLIENT_ID: 'test-client.apps.googleusercontent.com' }, stdio: 'ignore' })
+    try {
+      const page = await browser.newPage({ viewport: { width: 1300, height: 1000 } })
+      const errors = []; page.on('pageerror', (e) => errors.push(String(e)))
+      const drive = { file: null, creates: 0, patches: 0 }
+      await page.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.google={accounts:{oauth2:{initTokenClient:(c)=>({requestAccessToken:()=>setTimeout(()=>c.callback({access_token:'tok',expires_in:3600}),10)}),revoke:(t,cb)=>cb&&cb()}}}` }))
+      await page.route('https://www.googleapis.com/**', async (r) => {
+        const req = r.request(), url = req.url()
+        assert.equal(req.headers().authorization, 'Bearer tok')
+        if (url.includes('/oauth2/v3/userinfo')) return r.fulfill({ json: { email: 'teste@exemplo.com', given_name: 'Teste' } })
+        if (url.includes('/drive/v3/files?spaces=appDataFolder')) return r.fulfill({ json: { files: drive.file ? [{ id: 'f1' }] : [] } })
+        if (url.includes('/drive/v3/files/f1?alt=media')) return r.fulfill({ json: drive.file })
+        if (url.includes('/upload/drive/v3/files?uploadType=multipart')) {
+          const body = req.postData()
+          assert.match(body, /"parents":\["appDataFolder"\]/)
+          drive.file = JSON.parse(body.split('\r\n\r\n')[2].split('\r\n--')[0]); drive.creates++
+          return r.fulfill({ json: { id: 'f1' } })
+        }
+        if (url.includes('/upload/drive/v3/files/f1?uploadType=media')) { drive.file = JSON.parse(req.postData()); drive.patches++; return r.fulfill({ json: {} }) }
+        r.fulfill({ status: 404 })
+      })
+      await page.goto(base)
+      await page.evaluate(() => localStorage.clear()); await page.reload()
+      await page.uncheck('#useMaia'); await page.selectOption('#depth', 'fast')
+      // salva desafios ANTES do login (ficam locais)
+      await page.fill('#pgn', read('game2.pgn')); await page.click('.chip[data-side=w]')
+      await page.click('#go'); await waitDone(page)
+      await page.click('[data-act=gsave]')
+      // login: adota os desafios locais e sobe pro Drive
+      await page.click('#acct [data-acct=in]')
+      await page.waitForFunction(() => /salvo no Drive/.test(document.querySelector('#acct').textContent), null, { timeout: 30000 })
+      assert.equal(drive.creates, 1)
+      assert.ok(Object.keys(drive.file.puzzles).length > 0)
+      // treinar e responder um desafio sincroniza de novo (PATCH)
+      await page.click('#trainBtn'); await page.waitForSelector('text=Desafio 1 de')
+      await page.click('[data-act=treveal]')
+      await page.waitForFunction(() => /salvo no Drive/.test(document.querySelector('#acct').textContent), null, { timeout: 30000 })
+      await page.waitForTimeout(1500)
+      assert.ok(drive.patches >= 1)
+      assert.ok(Object.values(drive.file.puzzles).some((p) => p.attempts === 1))
+      assert.deepEqual(errors, [])
+      await page.close()
+    } finally {
+      execSync('bash build.sh', { env: { ...process.env, GOOGLE_CLIENT_ID: '' }, stdio: 'ignore' })
+    }
   })
 })

@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import * as R from '../build/review.node.mjs'
 import { Uci } from '../build/uci.node.mjs'
 import { preprocess, postprocess } from '../build/maia-core.node.mjs'
+import * as P from '../build/puzzles.node.mjs'
 
 const require = createRequire(import.meta.url)
 const read = (f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')
@@ -165,5 +166,38 @@ describe('Maia-3', () => {
     const fen = R.parseGame('1. e4 Nc6 2. d3 e5 3. g3 Nf6 4. f4 Bc5 5. c4 d5 6. Nf3').positions.at(-1)
     const lo = (await run(fen, 600)).policy.d5e4, hi = (await run(fen, 2200)).policy.d5e4
     assert.ok(hi > lo, `${lo} < ${hi}`)
+  })
+})
+
+describe('desafios salvos', () => {
+  const mk = (id) => ({ id, fen: '8/8/8/8/8/8/8/8 w - - 0 1', best: 'a1a2' })
+  test('id estável e sem repetir', () => {
+    assert.equal(P.puzzleId('r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3', 'f1b5'), P.puzzleId('r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 9 9', 'f1b5'))
+    const s = P.emptyStore()
+    assert.equal(P.addPuzzles(s, [mk('a'), mk('b')], 1000), 2)
+    assert.equal(P.addPuzzles(s, [mk('a')], 2000), 0)
+    assert.equal(P.stats(s, 1000).due, 2)
+  })
+  test('agenda: acerto de primeira espaça, erro volta logo', () => {
+    const s = P.emptyStore(); P.addPuzzles(s, [mk('a')], 0)
+    let p = P.recordResult(s, 'a', true, 0)
+    assert.equal(p.box, 1); assert.equal(p.due, P.DAY)
+    p = P.recordResult(s, 'a', true, P.DAY)
+    assert.equal(p.box, 2); assert.equal(p.due, P.DAY + 3 * P.DAY)
+    p = P.recordResult(s, 'a', false, 5 * P.DAY)
+    assert.equal(p.box, 0); assert.ok(p.due < 5 * P.DAY + P.DAY)
+  })
+  test('merge entre aparelhos: versão mais nova ganha, remoção vale', () => {
+    const a = P.emptyStore(), b = P.emptyStore()
+    P.addPuzzles(a, [mk('x'), mk('y')], 100)
+    P.addPuzzles(b, [mk('x'), mk('z')], 100)
+    P.recordResult(b, 'x', true, 200)
+    P.removePuzzle(a, 'y', 300)
+    const m = P.mergeStores(a, b)
+    assert.deepEqual(Object.keys(m.puzzles).sort(), ['x', 'z'])
+    assert.equal(m.puzzles.x.box, 1)
+    // apagar num aparelho não ressuscita no outro
+    const m2 = P.mergeStores(m, b)
+    assert.equal(m2.puzzles.y, undefined)
   })
 })

@@ -57,6 +57,22 @@ npm run review -- test/game.pgn 14 # imprime o review de uma partida no terminal
 
 O GitHub Actions (`.github/workflows/ci.yml`) roda os dois em todo push e pull request, e só publica no GitHub Pages se passarem.
 
+## Desafios e login com Google
+
+Os momentos-chave de cada partida (seus erros e as chances de punir o adversário) podem ser salvos como **desafios**. A tela **🎯 Treinar** mostra os que estão pra revisar, com repetição espaçada (acertou de primeira: volta em 1, 3, 7, 16 e 35 dias; errou: volta logo).
+
+Sem login, os desafios ficam no navegador. Com **Entrar com Google**, ficam num arquivo oculto do app no Google Drive de cada pessoa (escopo `drive.appdata`, que só enxerga os arquivos do próprio app) e sincronizam entre aparelhos. Não tem servidor: o navegador fala direto com o Google.
+
+Pra ligar o login (uma vez):
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → crie um projeto.
+2. **APIs e serviços → Biblioteca** → ative a **Google Drive API**.
+3. **Tela de consentimento OAuth**: tipo *Externo*, escopos `.../auth/drive.appdata`, `openid`, `email`, `profile`. Enquanto estiver em *Teste*, só entram os e-mails cadastrados em **Usuários de teste** (até 100).
+4. **Credenciais → Criar credenciais → ID do cliente OAuth** → *Aplicativo da Web*. Em **Origens JavaScript autorizadas**: `https://mathitos.github.io` (e `http://localhost:8765` pra desenvolver).
+5. Copie o Client ID e, no GitHub, crie a variável **`GOOGLE_CLIENT_ID`** em *Settings → Secrets and variables → Actions → Variables*. Rode o CI de novo.
+
+Local: `GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com npm run build`. Sem a variável, o app funciona igual, só sem o botão do Google.
+
 ## Estrutura
 
 ```
@@ -66,6 +82,8 @@ src/
   uci.js          cliente UCI mínimo (Web Worker ou Node)
   maia-core.js    pré/pós-processamento do Maia-3 (port do maia-platform-frontend)
   maia-worker.js  worker com onnxruntime-web
+  puzzles.js      desafios salvos: agenda de revisão e merge entre aparelhos
+  gdrive.js       login Google (Identity Services) + arquivo no appDataFolder do Drive
   template.html   HTML/CSS (o JS é embutido no build)
 assets/           modelo do Maia, índice de lances, peças
 test/             partidas de exemplo, testes unitários (node:test) e end-to-end (Playwright)
