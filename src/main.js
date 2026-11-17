@@ -77,7 +77,7 @@ function maiaRun(items, progress) {
 function initSetup() {
   $('#pgn').value = store.get('lastPgn', '')
   $('#user').value = store.get('user', '')
-  $('#depth').value = store.get('depth', 'normal')
+  $('#depth').value = 'deep' // padrão sempre a análise mais profunda
   $('#useMaia').checked = store.get('useMaia', true)
   $('#maiaLevel').value = String(store.get('maiaLevel', 'auto'))
   $('#sample').onclick = () => { $('#pgn').value = SAMPLE; $('#user').value ||= 'matheus_anzzulin'; updateDetect() }
@@ -176,7 +176,7 @@ async function start() {
   const d = R.detectInput(text)
   $('#err').textContent = ''
   const user = $('#user').value.trim()
-  store.set('lastPgn', text); store.set('user', user); store.set('depth', $('#depth').value)
+  store.set('lastPgn', text); store.set('user', user);
   store.set('useMaia', $('#useMaia').checked); store.set('maiaLevel', $('#maiaLevel').value)
   if (d.kind === 'empty') { $('#err').textContent = 'Cola um PGN, link ou FEN.'; return }
   if (d.kind === 'error') { $('#err').textContent = d.message; return }

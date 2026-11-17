@@ -34,7 +34,7 @@ async function newPage() {
   await page.evaluate(() => localStorage.clear())
   await page.reload()
   await page.uncheck('#useMaia')
-  await page.selectOption('#depth', 'fast')
+  await page.selectOption('#depth', 'fast') // padrão é Profunda; nos testes usa a rápida
   return { page, errors }
 }
 async function waitDone(page, sel = '#st-sf', prefix = 'pronto', ms = 180000) {
