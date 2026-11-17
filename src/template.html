@@ -135,6 +135,13 @@ p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
 .vmv .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
 .vdel{background:none;border:0;color:var(--muted);cursor:pointer;padding:2px 6px;border-radius:4px}.vdel:hover{background:#5a2b2b;color:#fff}
 #moves button.mv.fork{outline:2px dashed #4a8fd6;outline-offset:-2px}
+#guide{background:var(--panel);border-radius:10px;padding:10px 14px;border-left:4px solid #81b64c}
+#guide .g-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+#guide .acts{margin:8px 0 0}
+.btn.act.on{background:#4a8fd6;color:#fff}
+.btn.act.ghost{background:transparent;border:1px solid #4a4744}.btn.act.ghost.on{background:#2f3a47;border-color:#4a8fd6}
+.ref{border-bottom:1px dashed #4a8fd6;cursor:pointer;font-weight:600}.ref:hover{background:#2f3a47;border-radius:3px}
+p.say.step{min-height:48px;background:#2b2926;border-radius:8px;padding:10px 12px}
 @media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
 </style>
 </head>
@@ -167,12 +174,13 @@ p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
     <div class="navbar">
       <button class="btn" id="first" title="Início">⏮</button><button class="btn" id="prev" title="Anterior (←)">◀</button><span id="counter"></span><button class="btn" id="next" title="Próximo (→)">▶</button><button class="btn" id="last" title="Fim">⏭</button>
       <span class="grow"></span>
-      <button class="btn" id="prevErr" title="Erro anterior seu">◀ erro</button><button class="btn" id="nextErr" title="Próximo erro seu">erro ▶</button><button class="btn" id="flip" title="Virar tabuleiro">⇅</button>
+      <button class="btn" id="prevErr" title="Momento-chave anterior">⏮ momento</button><button class="btn" id="nextErr" title="Autoplay até o próximo momento-chave (1,5s por lance)">⏩ momento</button><button class="btn" id="flip" title="Virar tabuleiro">⇅</button>
     </div>
     <div class="toggles"><span class="muted">Arraste uma peça pra explorar variantes.</span><label><input type="checkbox" id="showBest" checked> seta do melhor lance</label><label><input type="checkbox" id="showNext"> seta do melhor lance agora</label></div>
   </div>
   <div class="side">
     <div id="players"></div>
+    <div id="guide" hidden></div>
     <div id="coach"></div>
     <div id="graph" title="Clique pra pular pra esse ponto"></div>
     <div id="moves"></div>

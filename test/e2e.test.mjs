@@ -125,6 +125,59 @@ describe('app', () => {
     assert.deepEqual(errors, [])
   })
 
+  test('explicar a linha lance a lance, mostrar visual e texto interativo', { timeout: 300000 }, async () => {
+    const { page, errors } = await newPage()
+    await page.fill('#pgn', read('game2.pgn'))
+    await page.click('#go'); await waitDone(page)
+    await page.evaluate(() => document.querySelector('#mv33').click()) // 17.Nf7??
+    const arrows = () => page.locator('#board svg line').count()
+    // botões "Mostrar…"
+    const vis = page.locator('[data-vis]')
+    assert.ok((await vis.count()) > 0)
+    const before = await arrows()
+    await vis.first().click()
+    assert.ok((await arrows()) > before)
+    assert.equal(await page.locator('[data-vis].on').count(), 1)
+    // texto interativo: passar o mouse num lance citado desenha no tabuleiro
+    await page.click('[data-vis].on') // desliga o overlay
+    const base = await arrows()
+    await page.hover('#coach .say .ref >> nth=0')
+    assert.ok((await page.locator('#board svg rect').count()) > 64 || (await arrows()) > base)
+    // explicar passo a passo, sem autoplay
+    await page.click('[data-act=punish]')
+    assert.match(await page.textContent('#coach'), /lance por lance/)
+    await page.waitForTimeout(2000)
+    assert.match(await page.textContent('#coach'), /lance 0\//) // não andou sozinho
+    await page.click('[data-act=lnext]')
+    assert.match(await page.textContent('#coach .say.step'), /Nf7/)
+    await page.click('[data-act=lnext]')
+    assert.match(await page.textContent('#coach .say.step'), /mate/)
+    assert.deepEqual(errors, [])
+  })
+
+  test('revisão guiada: autoplay até o momento-chave e puzzle', { timeout: 300000 }, async () => {
+    const { page, errors } = await newPage()
+    await page.fill('#pgn', read('game2.pgn'))
+    await page.click('.chip[data-side=w]')
+    await page.click('#go'); await waitDone(page)
+    await page.waitForSelector('[data-act=gstart]')
+    assert.match(await page.textContent('#guide'), /momentos-chave/)
+    await page.click('[data-act=gstart]')
+    // autoplay anda 1 lance a cada 1,5s (não pula direto)
+    await page.waitForTimeout(3300)
+    const n = +(await page.textContent('#counter')).split('/')[0]
+    assert.ok(n >= 1 && n <= 3, 'autoplay deveria ter andado 2 lances, andou ' + n)
+    await page.waitForFunction(() => /Momento-chave|Acha a punição/.test(document.querySelector('#coach').textContent), null, { timeout: 120000 })
+    assert.match(await page.textContent('#guide'), /momento 1 de/)
+    // pular pro próximo momento direto
+    await page.click('[data-act=reveal]')
+    await page.click('#guide [data-act=gskip]')
+    assert.match(await page.textContent('#guide'), /momento 2 de/)
+    await page.click('[data-act=gstop]')
+    assert.equal(await page.locator('[data-act=gstart]').count(), 1)
+    assert.deepEqual(errors, [])
+  })
+
   test('várias partidas, lado das pretas e relógio', { timeout: 300000 }, async () => {
     const { page, errors } = await newPage()
     const clock = read('game-clock.pgn').replace('"matheus_anzzulin"', '"Fulano"').replace('"Ronkolan"', '"matheus_anzzulin"')

@@ -10,7 +10,10 @@ Cola a partida do jeito que o chess.com ou o Lichess compartilham (PGN com ou se
 - **explica o porquê**: peça pendurada, garfo, cravada, mate permitido, ameaça ignorada, rei exposto, peças sem desenvolver, roque pro lado errado, e o que o melhor lance faria;
 - **mostra o que humanos do seu nível jogariam** (Maia-3), inclusive quem acharia o melhor lance em cada faixa de rating;
 - **Tentar de novo**: nos seus erros, você joga no tabuleiro e o Stockfish confere se achou um lance bom;
-- **Ver continuação**: anima no tabuleiro a melhor linha e a punição do adversário;
+- **Explicar**: percorre a melhor linha (ou a punição) lance a lance, com um comentário e setas em cada passo; avança no seu ritmo ou em autoplay de 1,5s;
+- **Revisão guiada**: passa pelos momentos-chave (seus erros, erros do adversário que você podia punir, seus lances bons), dando autoplay de 1,5s por lance até cada um e abrindo um puzzle de "ache o lance";
+- **Mostrar…**: botões que desenham no tabuleiro o garfo, a peça pendurada, o mate, a ameaça ou a ideia do melhor lance; lances e casas citados no texto do coach acendem no tabuleiro ao passar o mouse;
+- **Variantes**: arraste qualquer peça pra abrir um fork; ele fica salvo no histórico da partida;
 - mostra o **relógio** de cada jogador em cada momento e o **tempo gasto** em cada lance (a partir do `[%clk]` do PGN);
 - **explorar variantes**: arrasta qualquer peça pra testar lances, com avaliação e classificação do Stockfish;
 - exporta o **PGN anotado** com os comentários.

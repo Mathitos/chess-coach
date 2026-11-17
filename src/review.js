@@ -461,7 +461,25 @@ export function coachText(game, sf, threats, cls, k, maia, opts = {}) {
     else if (['best', 'excellent', 'great', 'brilliant'].includes(r.cls) && pPlayed < 0.08) human = `Lance pouco óbvio: só ${pct(pPlayed)} dos jogadores ~${lvl} achariam.`
     else if (!bad && r.cls !== 'forced' && pPlayed >= 0.5) human = `Lance natural: ${pct(pPlayed)} dos jogadores ~${lvl} jogariam igual.`
   }
-  const out = { text: parts.join(' '), tip: tip[0] || null, human, bestSan: best.san, bestLine: bestLine ? sanLine(fenB, bestLine.pv, 6) : [], replySan: reply ? sanLine(fenA, reply.pv, 6) : [] }
+  // board visuals for the "Mostrar…" buttons
+  const visuals = []
+  const lineArrows = (f, pv, n, col) => playLine(f, pv, n).moves.map((m, i) => [m.from, m.to, i % 2 ? 'rgba(250,65,45,.55)' : col])
+  if (reply && reply.pv.length) {
+    if (replyM.mate) visuals.push({ label: 'Mostrar o mate', arrows: lineArrows(fenA, reply.pv, Math.min(replyM.mate * 2 - 1, 5), '#fa412d'), marks: [] })
+    else if (replyM.fork) visuals.push({ label: 'Mostrar o garfo', arrows: [[replyM.move.from, replyM.move.to, '#fa412d'], ...replyM.fork.map((x) => [replyM.move.to, x.square, '#fa412d'])], marks: replyM.fork.map((x) => [x.square, '#fa412d']) })
+    const hang = hangingPieces(chA, c)
+    if (hang.length && !['best', 'excellent', 'great', 'brilliant'].includes(r.cls)) {
+      const att = chA.attackers(hang[0].sq, opp(c))
+      visuals.push({ label: 'Mostrar peça pendurada', arrows: att.slice(0, 2).map((a) => [a, hang[0].sq, '#fa412d']), marks: [[hang[0].sq, '#fa412d']] })
+    }
+  }
+  if (threat && threat.real) visuals.push({ label: 'Mostrar a ameaça', arrows: [[threat.uci.slice(0, 2), threat.uci.slice(2, 4), '#fa412d']], marks: [[threat.uci.slice(2, 4), '#fa412d']] })
+  if (bestLine && bestLine.pv.length && p.uci !== r.bestUci) {
+    const vis = { arrows: [], marks: [] }
+    describeIdea(fenB, bestLine.pv, c, threat, vis)
+    visuals.push({ label: `Mostrar a ideia de ${best.san}`, fen: fenB, note: 'posição antes do seu lance', ...vis })
+  }
+  const out = { text: parts.join(' '), tip: tip[0] || null, human, visuals, bestSan: best.san, bestLine: bestLine ? sanLine(fenB, bestLine.pv, 6) : [], replySan: reply ? sanLine(fenA, reply.pv, 6) : [] }
   if (opts.third) return opponentView(game, sf, threats, cls, k, out, parts)
   return out
 }
@@ -502,7 +520,15 @@ function opponentView(game, sf, threats, cls, k, out, parts) {
     if (own.length && say.length === 1) say.push(cap(joinPt(own)) + '.')
   }
   const myBest = myLine && myLine.pv.length ? sanLine(fenA, myLine.pv, 6) : []
-  return { ...out, text: say.join(' '), tip: null, human: null, punishSan: bad ? myBest : [] }
+  const visuals = []
+  if (bad && myLine && myLine.pv.length) {
+    const vis = { arrows: [], marks: [] }
+    describeIdea(fenA, myLine.pv, me, threats && threats[k + 1], vis)
+    visuals.push({ label: 'Mostrar a punição', ...vis })
+  }
+  const t2 = threats && threats[k + 1]
+  if (!bad && t2 && t2.real) visuals.push({ label: 'Mostrar a ameaça', arrows: [[t2.uci.slice(0, 2), t2.uci.slice(2, 4), '#fa412d']], marks: [[t2.uci.slice(2, 4), '#fa412d']] })
+  return { ...out, text: say.join(' '), tip: null, human: null, visuals, punishSan: bad ? myBest : [] }
 }
 const cap = (s) => s[0].toUpperCase() + s.slice(1)
 function thirdPerson(t) {
@@ -528,7 +554,8 @@ const joinPt = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + 
 const backRank = (c) => (c === 'w' ? '1' : '8')
 
 // Plain-language ideas behind a move (first move of pv), for `color`.
-export function describeIdea(fen, pv, color, threat) {
+export function describeIdea(fen, pv, color, threat, vis) {
+  const V = vis || { arrows: [], marks: [] }
   if (!pv || !pv.length) return []
   const chB = new Chess(fen)
   const { moves } = playLine(fen, pv, 3)
@@ -538,17 +565,19 @@ export function describeIdea(fen, pv, color, threat) {
   ch.move(m.san)
   const ideas = []
   const t = m.promotion || m.piece
-  if (ch.isCheckmate()) return ['é xeque-mate']
+  V.arrows.push([m.from, m.to, '#81b64c'])
+  if (ch.isCheckmate()) { const ks = ch.findPiece({ type: 'k', color: ch.turn() })[0]; if (ks) V.marks.push([ks, '#fa412d']); return ['é xeque-mate'] }
   if (m.flags.includes('k') || m.flags.includes('q')) ideas.push('roca e tira o rei do centro')
   if (m.captured) {
+    V.marks.push([m.to, '#f7c631'])
     if (hangingValue(chB, m.to) >= VAL[m.captured] - 0.5) ideas.push(`pega ${named(m.captured)} de graça`)
     else if (VAL[m.captured] > VAL[m.piece]) ideas.push(`pega ${named(m.captured)} ${listPieces([m.piece], 'por')}`)
   }
   const fork = detectFork(ch, m)
-  if (fork) ideas.push(`faz um garfo ${fork.map((x) => namedEm(x.type)).join(' e ')}`)
+  if (fork) { ideas.push(`faz um garfo ${fork.map((x) => namedEm(x.type)).join(' e ')}`); for (const x of fork) { V.arrows.push([m.to, x.square, '#fa412d']); V.marks.push([x.square, '#fa412d']) } }
   else {
     const pin = detectPin(ch, m)
-    if (pin) ideas.push(`crava ${named(pin.pinned.type, pin.pinned.square)} contra ${named(pin.behind.type)}`)
+    if (pin) { ideas.push(`crava ${named(pin.pinned.type, pin.pinned.square)} contra ${named(pin.behind.type)}`); V.arrows.push([m.to, pin.behind.square, '#f7c631']); V.marks.push([pin.pinned.square, '#f7c631']) }
     // direct attacks on valuable or loose pieces
     const hits = []
     for (const row of ch.board()) for (const p of row) {
@@ -556,22 +585,24 @@ export function describeIdea(fen, pv, color, threat) {
       if (!ch.attackers(p.square, color).includes(m.to)) continue
       if (VAL[p.type] > VAL[t] || hangingValue(ch, p.square) >= 2) hits.push(p)
     }
-    if (hits.length) ideas.push(`ataca ${named(hits[0].type, hits[0].square)}`)
+    if (hits.length) { ideas.push(`ataca ${named(hits[0].type, hits[0].square)}`); V.arrows.push([m.to, hits[0].square, '#fa412d']); V.marks.push([hits[0].square, '#fa412d']) }
   }
   if (m.san.includes('+') && !ideas.length) ideas.push('dá xeque e ganha tempo')
   // escapes / defends
   if (t !== 'p' && hangingValue(chB, m.from) >= 2 && hangingValue(ch, m.to) === 0) ideas.push(`tira ${named(t)} do ataque`)
   for (const h of hangingPieces(chB, color)) {
     if (h.sq === m.from) continue
-    if (hangingValue(ch, h.sq) === 0 && ch.get(h.sq)?.color === color) { ideas.push(`defende ${named(h.type, h.sq)}`); break }
+    if (hangingValue(ch, h.sq) === 0 && ch.get(h.sq)?.color === color) { ideas.push(`defende ${named(h.type, h.sq)}`); V.marks.push([h.sq, '#4a8fd6']); break }
   }
   if (threat && threat.real && !ideas.length) ideas.push(`segura a ameaça ${threat.san}`)
   if ((t === 'n' || t === 'b') && m.from[1] === backRank(color) && !ideas.length) ideas.push(`desenvolve ${named(t)}`)
   if (t === 'p' && ['d4', 'e4', 'd5', 'e5'].includes(m.to) && !ideas.length) ideas.push('briga pelo centro')
   // follow-up threat in the engine line
   const next = moves[2]
-  if (next && ideas.length < 3 && (next.san.includes('#') || (next.captured && VAL[next.captured] >= 3)))
-    ideas.push(`e prepara ${next.san}${next.san.includes('#') ? ' (mate)' : ''}`)
+  if (next && ideas.length < 3 && (next.san.includes('#') || (next.captured && VAL[next.captured] >= 3))) {
+    ideas.push(`prepara ${next.san}${next.san.includes('#') ? ' (mate)' : ''}`)
+    V.arrows.push([next.from, next.to, 'rgba(129,182,76,.6)'])
+  }
   return ideas.slice(0, 3)
 }
 
@@ -773,4 +804,44 @@ export function fmtSpent(s) {
   if (s < 10) return s.toFixed(1) + 's'
   if (s < 60) return Math.round(s) + 's'
   return `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}`
+}
+
+
+// ── Step-by-step explanation of an engine line ("Explicar") ─────────────────
+// pv: uci moves starting at fen. Returns one comment (+ board visuals) per move.
+export function explainLine(fen, pv, opts = {}) {
+  const steps = []
+  const c = new Chess(fen)
+  const start = fen
+  const moves = []
+  for (let i = 0; i < pv.length; i++) {
+    const u = pv[i]
+    const before = c.fen()
+    let m
+    try { m = c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }) } catch { break }
+    moves.push(m)
+    const vis = { arrows: [], marks: [] }
+    const ideas = describeIdea(before, pv.slice(i), m.color, null, vis)
+    const who = opts.side ? (m.color === opts.side ? 'Você' : 'O adversário') : (m.color === 'w' ? 'As brancas' : 'As pretas')
+    let text
+    if (i === 0 && opts.firstNote) text = opts.firstNote
+    else if (ideas.length) text = `${m.san}: ${joinPt(ideas)}.`
+    else if (m.san.includes('+')) text = `${m.san}: xeque.`
+    else text = `${m.san}: ${who.toLowerCase() === 'você' ? 'você melhora' : who.toLowerCase() + ' melhora'} a posição.`
+    if (c.isCheckmate()) text = `${m.san}: xeque-mate!`
+    steps.push({ san: m.san, color: m.color, from: m.from, to: m.to, fen: c.fen(), text, vis })
+  }
+  // summary on the last step: material balance of the whole line
+  if (steps.length) {
+    const side = opts.side || moves[0].color
+    const mat = pvMaterial(start, pv.slice(0, steps.length), side, steps.length)
+    const last = steps[steps.length - 1]
+    let sum = ''
+    if (new Chess(last.fen).isCheckmate()) sum = ''
+    else if (mat.delta >= 2) sum = ` Saldo da linha: você ${gainText(mat, side)}.`
+    else if (mat.delta <= -2) sum = ` Saldo da linha: você ${lossText(mat, side)}.`
+    if (opts.evalText) sum += ` Avaliação no fim: ${opts.evalText}.`
+    last.text += sum
+  }
+  return steps
 }

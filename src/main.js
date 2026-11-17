@@ -198,7 +198,7 @@ async function start() {
   const lvl = (elo) => (lvlSel === 'auto' ? Math.max(600, Math.min(2600, Math.round((+elo || 1000) / 100) * 100)) : +lvlSel)
   Object.assign(S, { game, sf: new Array(game.positions.length), threats: new Array(game.plies.length), infos: [], cls: [], maia: [], maiaRaw: {}, idx: 0, side, flip: side === 'b', maiaElo: { w: lvl(h.WhiteElo), b: lvl(h.BlackElo) } })
   const runId = ++S.runId
-  S.vars = []; S.anCache = {}; S.sel = null; S.mode = null
+  S.vars = []; S.anCache = {}; S.sel = null; S.mode = null; S.guide = false; S.guideMsg = null; stopAuto()
   resetStockfish()
   $('#an-maia').textContent = ''
   show('review')
@@ -211,7 +211,7 @@ async function start() {
 }
 
 function startPosition(fen) {
-  S.vars = []; S.anCache = {}; S.sel = null; S.mode = null
+  S.vars = []; S.anCache = {}; S.sel = null; S.mode = null; S.guide = false; S.guideMsg = null; stopAuto()
   const game = { headers: {}, plies: [], positions: [fen] }
   Object.assign(S, { game, sf: [], threats: [], infos: [], cls: [], maia: [], maiaRaw: {}, idx: 0, side: fen.split(' ')[1], flip: fen.split(' ')[1] === 'b', clock: null })
   S.runId++
@@ -348,6 +348,13 @@ function arrow(from, to, color, flip, w = 16) {
   return `<g opacity=".85"><line x1="${ax + ux * 18}" y1="${ay + uy * 18}" x2="${hx}" y2="${hy}" stroke="${color}" stroke-width="${w}" stroke-linecap="round"/>` +
     `<polygon points="${bx - ux * 8},${by - uy * 8} ${hx + px * 26},${hy + py * 26} ${hx - px * 26},${hy - py * 26}" fill="${color}"/></g>`
 }
+function hexA(c, a) { return c.startsWith('#') ? c + Math.round(a * 255).toString(16).padStart(2, '0') : c }
+function addHover(v) {
+  v.arrows = v.arrows || []; v.marks = v.marks || []
+  const o = S.hover || S.overlay
+  if (o) { v.arrows.push(...(o.arrows || []).map((a) => [a[0], a[1], a[2] || '#4a8fd6', a[3] || 13])); v.marks.push(...(o.marks || []).map(([q, c]) => [q, hexA(c || '#4a8fd6', 0.4)])) }
+  return v
+}
 function boardView() {
   const v = boardViewBase()
   if (S.drag && S.drag.started) v.hide = S.drag.from
@@ -366,12 +373,15 @@ function boardViewBase() {
     const an = anFor(fen)
     if (an && an.lines?.[0]?.pv?.[0] && $('#showBest').checked) { const u = an.lines[0].pv[0]; v.arrows.push([u.slice(0, 2), u.slice(2, 4), '#81b64c', 14]) }
     v.info = an ? R.evalInfo(fen, an) : null
-    return v
+    return addHover(v)
   }
   if (M && M.type === 'line') {
-    const mv = M.i > 0 ? M.moves[M.i - 1] : null
-    const nxt = M.moves[M.i]
-    return { fen: M.fens[M.i], last: mv && { from: mv.from, to: mv.to, color: '#74b0e0', op: 0.6 }, arrows: nxt ? [[nxt.from, nxt.to, 'rgba(116,176,224,.75)', 10]] : [] }
+    const st = M.i > 0 ? M.steps[M.i - 1] : null
+    const nxt = M.steps[M.i]
+    const v = { fen: M.fens[M.i], last: st && { from: st.from, to: st.to, color: '#74b0e0', op: 0.6 }, arrows: [], marks: [] }
+    if (st) { v.arrows.push(...st.vis.arrows.filter((a) => !(a[0] === st.from && a[1] === st.to)).map((a) => [a[0], a[1], a[2], 11])); v.marks.push(...st.vis.marks.map(([q, c]) => [q, hexA(c, 0.35)])) }
+    else if (nxt) v.arrows.push([nxt.from, nxt.to, 'rgba(116,176,224,.75)', 10])
+    return addHover(v)
   }
   if (M && M.type === 'retry') {
     const v = { fen: M.fen, last: null, arrows: [], sel: M.sel, dots: [], marks: [] }
@@ -379,17 +389,18 @@ function boardViewBase() {
     if (M.hint) v.marks.push([M.hint, 'rgba(129,182,76,.55)'])
     if (M.wrong) v.last = { from: M.wrong.slice(0, 2), to: M.wrong.slice(2, 4), color: '#fa412d', op: 0.45 }
     if (M.solved) v.last = { from: M.solved.slice(0, 2), to: M.solved.slice(2, 4), color: '#81b64c', op: 0.55 }
-    return v
+    return addHover(v)
   }
   const last = i > 0 ? g.plies[i - 1] : null
   const r = i > 0 ? S.cls[i - 1] : null
+  if (S.overlay?.fen) return addHover({ fen: S.overlay.fen, arrows: [], marks: [] }) // visual that belongs to the position before the move
   const v = { fen: g.positions[i], arrows: [], badge: null, sel: S.sel, dots: [] }
   if (S.sel) v.dots = new Chess(g.positions[i]).moves({ square: S.sel, verbose: true }).map((m) => m.to)
   if (last) v.last = { from: last.from, to: last.to, color: r ? R.CLASSES[r.cls].color : '#f5f682', op: r ? 0.45 : 0.5 }
   if (last && r && !['best', 'forced', 'brilliant', 'great'].includes(r.cls) && r.bestUci && $('#showBest').checked) v.arrows.push([r.bestUci.slice(0, 2), r.bestUci.slice(2, 4), '#81b64c', 16])
   if ($('#showNext').checked && S.sf[i]?.lines?.[0]?.pv?.[0]) { const u = S.sf[i].lines[0].pv[0]; v.arrows.push([u.slice(0, 2), u.slice(2, 4), '#4a8fd6', 12]) }
   if (last && r) v.badge = [last.to, R.CLASSES[r.cls]]
-  return v
+  return addHover(v)
 }
 function renderBoard() {
   const g = S.game, i = S.idx, flip = S.flip
@@ -463,6 +474,29 @@ function renderPlayerBars(ch) {
   $('#pBot').innerHTML = bar(top === 'w' ? 'b' : 'w')
 }
 
+// Interactive coach text: moves and squares light up on the board on hover/tap.
+const TOKEN_RE = /(O-O-O|O-O|\b[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)/g
+function linkify(text, ctx) {
+  const c = encodeURIComponent(JSON.stringify(ctx.filter(Boolean)))
+  return esc(text).replace(TOKEN_RE, (t) => `<span class="ref" data-t="${t}" data-ctx="${c}">${t}</span>`)
+}
+function resolveRef(tok, ctx) {
+  if (/^[a-h][1-8]$/.test(tok)) return { arrows: [], marks: [[tok, '#4a8fd6']] }
+  for (const fen of ctx) {
+    try { const m = new Chess(fen).move(tok.replace(/[+#]$/, '')); if (m) return { arrows: [[m.from, m.to, '#4a8fd6']], marks: [[m.to, '#4a8fd6']] } } catch {}
+  }
+  const sq = /([a-h][1-8])(?:=[QRBN])?[+#]?$/.exec(tok)
+  return sq ? { arrows: [], marks: [[sq[1], '#4a8fd6']] } : null
+}
+function onRefOver(e) {
+  const el = e.target.closest('.ref'); if (!el) return
+  let ctx = []
+  try { ctx = JSON.parse(decodeURIComponent(el.dataset.ctx)) } catch {}
+  S.hover = resolveRef(el.dataset.t, ctx)
+  renderBoard()
+}
+function onRefOut(e) { if (e.target.closest('.ref') && S.hover) { S.hover = null; renderBoard() } }
+
 // ── Coach panel ─────────────────────────────────────────────────────────────
 function renderCoach() {
   const g = S.game, i = S.idx
@@ -486,15 +520,18 @@ function renderCoach() {
   const t = R.coachText(g, S.sf.map((x) => x || { lines: [] }), S.threats, S.cls, k, S.maia.length ? S.maia : null, { third: !mine })
   const who = mine ? '' : `<span class="tag">adversário</span>`
   let html = `<div class="coach-head"><div class="badge" style="background:${C.color}">${C.sym}</div><div><b>${esc(moveLbl)}</b> é <b style="color:${C.color}">${C.label.toLowerCase()}</b> ${who}<div class="sub">avaliação ${esc(r.after.text)} · ${mine ? 'sua chance' : 'chance dele'} ${Math.round(r.wpBefore)}% → ${Math.round(r.wpAfter)}%${S.clock && S.clock.spent[k] != null ? ` · ⏱ ${R.fmtSpent(S.clock.spent[k])}` : ''}</div></div></div>`
-  html += `<p class="say">${esc(t.text)}</p>`
+  const ctx = [g.positions[k], g.positions[k + 1]]
+  S.lastVisuals = t.visuals || []
+  html += `<p class="say">${linkify(t.text, ctx)}</p>`
   const sp = S.clock ? S.clock.spent[k] : null
   if (mine && sp !== null && sp !== undefined && ['mistake', 'blunder', 'miss'].includes(r.cls) && sp <= 3) html += `<p class="tip">⏱ Você jogou esse lance em ${R.fmtSpent(sp)}. Num momento crítico assim, vale gastar uns segundos conferindo o que o adversário ameaça.</p>`
-  if (t.tip) html += `<p class="tip">💡 ${esc(t.tip)}</p>`
+  if (t.tip) html += `<p class="tip">💡 ${linkify(t.tip, ctx)}</p>`
+  if (S.lastVisuals.length) html += `<div class="acts vis">${S.lastVisuals.map((v, i) => `<button class="btn act ghost${S.overlayIdx === i ? ' on' : ''}" data-vis="${i}" title="${v.note ? esc(v.note) : ''}">👁 ${esc(v.label)}</button>`).join('')}</div>`
   const bad = ['inaccuracy', 'mistake', 'blunder', 'miss'].includes(r.cls)
   html += `<div class="acts">`
   if (mine && bad) html += `<button class="btn act retry" data-act="retry">↻ Tentar de novo</button>`
   if (!mine && bad && g.plies[k + 1] && S.cls[k + 1]) html += `<button class="btn act retry" data-act="punishTry">🎯 Achar a punição</button>`
-  if (t.bestLine.length && r.cls !== 'forced') html += `<button class="btn act" data-act="best">▶ ${r.cls === 'best' || p.uci === r.bestUci ? 'Ver continuação' : 'Ver melhor lance (' + esc(t.bestSan) + ')'}</button>`
+  if (t.bestLine.length && r.cls !== 'forced') html += `<button class="btn act" data-act="best">▶ ${r.cls === 'best' || p.uci === r.bestUci ? 'Explicar a continuação' : 'Explicar ' + esc(t.bestSan)}</button>`
   if (t.replySan.length && bad) html += `<button class="btn act" data-act="punish">▶ ${r.cls === 'miss' ? 'Ver o que acontece depois' : mine ? 'Ver como o adversário pune' : 'Ver como punir'}</button>`
   html += `</div>`
   // Maia
@@ -522,32 +559,40 @@ function renderCoach() {
 // ── Modes: line playback and retry ─────────────────────────────────────────
 function startLine(k, kind) {
   const g = S.game
-  let fen0 = g.positions[k], pv
+  const fen0 = g.positions[k]
   const reply = S.sf[k + 1]?.lines?.[0]?.pv || []
-  if (kind === 'best') { pv = (S.sf[k]?.lines?.[0]?.pv || []).slice(0, 10); }
-  else pv = [g.plies[k].uci, ...reply].slice(0, 9)
-  const { moves } = R.playLine(fen0, pv)
-  const fens = [fen0]
-  const c = new Chess(fen0)
-  for (const m of moves) { c.move(m.san); fens.push(c.fen()) }
-  const label = kind === 'best' ? `Linha do engine com ${moves[0]?.san || ''}` : S.cls[k]?.cls === 'miss' ? 'O que acontece depois do lance jogado' : (g.plies[k].color === S.side ? 'Como o adversário pune' : 'Como punir')
+  const pv = kind === 'best' ? (S.sf[k]?.lines?.[0]?.pv || []).slice(0, 10) : [g.plies[k].uci, ...reply].slice(0, 9)
+  const p = g.plies[k]
+  const firstNote = kind === 'punish' ? `${p.san}: ${p.color === S.side ? 'o lance que você jogou' : 'o lance que o adversário jogou'} na partida.` : null
+  const endIdx = kind === 'best' ? k : k + 1
+  const steps = R.explainLine(fen0, pv, { side: S.side, firstNote, evalText: kind === 'best' ? S.infos[k]?.text : S.infos[k + 1]?.text })
+  const fens = [fen0, ...steps.map((x) => x.fen)]
+  const label = kind === 'best' ? `Explicando ${steps[0]?.san || ''}` : S.cls[k]?.cls === 'miss' ? 'O que acontece depois do lance jogado' : (p.color === S.side ? 'Como o adversário pune' : 'Como punir')
   stopTimer()
-  S.mode = { type: 'line', k, kind, fens, moves, i: 0, label, playing: true }
+  S.overlay = null; S.overlayIdx = null
+  S.mode = { type: 'line', k, kind, fens, moves: steps, steps, i: 0, label, playing: false, endIdx }
   render()
-  S.mode.timer = setInterval(() => {
-    const M = S.mode
-    if (!M || M.type !== 'line') return stopTimer()
-    if (M.i >= M.moves.length) { M.playing = false; return stopTimer(), render() }
+}
+function lineAutoplay() {
+  const M = S.mode
+  if (M.playing) { stopTimer(); M.playing = false; return render() }
+  if (M.i >= M.moves.length) M.i = 0
+  M.playing = true
+  M.i++; render()
+  M.timer = setInterval(() => {
+    if (S.mode !== M) return clearInterval(M.timer)
+    if (M.i >= M.moves.length) { clearInterval(M.timer); M.timer = null; M.playing = false; return render() }
     M.i++; render()
-  }, 900)
+  }, 1500)
 }
 function stopTimer() { if (S.mode?.timer) { clearInterval(S.mode.timer); S.mode.timer = null } }
 function exitMode() { stopTimer(); S.mode = null; render() }
 function lineStep(d) { const M = S.mode; stopTimer(); M.playing = false; M.i = Math.max(0, Math.min(M.moves.length, M.i + d)); render() }
 
-function startRetry(k) {
+function startRetry(k, prompt) {
   stopTimer()
-  S.mode = { type: 'retry', k, fen: S.game.positions[k], sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false }
+  S.overlay = null; S.overlayIdx = null
+  S.mode = { type: 'retry', k, fen: S.game.positions[k], sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, prompt }
   render()
 }
 async function tryMove(uci) {
@@ -613,6 +658,7 @@ function userMove(uci) {
 }
 function onPointerDown(e) {
   if (!S.game || e.button > 0) return
+  if (S.overlay?.fen) { S.overlay = null; S.overlayIdx = null; render() }
   const sq = squareAt(e); if (!sq) return
   const fen = interactiveFen(); if (!fen) return
   const ch = new Chess(fen)
@@ -791,7 +837,7 @@ function renderExplorePanel(box) {
   if (m) {
     const c = v.cls[j]
     if (!c) html += `<p class="say muted">Avaliando ${esc(m.san)}…</p>`
-    else if (v.fb[j]) html += `<p class="say badmsg">${esc(v.fb[j])}</p>`
+    else if (v.fb[j]) html += `<p class="say badmsg">${linkify(v.fb[j], [v.fens[j], v.fens[j + 1]])}</p>`
     else html += `<p class="say good">${esc(m.san)}: ${R.CLASSES[c].label.toLowerCase()}.</p>`
   }
   const best = an?.lines?.[0]?.pv?.length ? R.playLine(fen, an.lines[0].pv, 4).moves.map((x) => x.san) : []
@@ -808,33 +854,44 @@ function renderModePanel(box) {
   const p = g.plies[M.k]
   const moveLbl = `${Math.floor(M.k / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}`
   if (M.type === 'line') {
-    const start = Math.floor(M.k / 2) + 1, wFirst = p.color === 'w'
     let seq = ''
     M.moves.forEach((m, j) => {
       const ply = M.k + j
       const num = ply % 2 === 0 ? `${Math.floor(ply / 2) + 1}. ` : j === 0 ? `${Math.floor(ply / 2) + 1}... ` : ''
       seq += `${num}<span class="lm${j + 1 === M.i ? ' cur' : ''}${M.kind === 'punish' && j === 0 ? ' played' : ''}" data-j="${j + 1}">${esc(m.san)}</span> `
     })
+    const st = M.i > 0 ? M.steps[M.i - 1] : null
+    const ctx = [M.fens[Math.max(0, M.i - 1)], M.fens[M.i]]
+    const say = st ? linkify(st.text, ctx) : `Vou explicar a linha lance por lance. Clica em <b>Próximo</b> (ou →) quando quiser avançar.`
+    const end = M.i >= M.moves.length
     box.innerHTML = `<div class="coach-head"><div class="avatar">▶</div><div><b>${esc(M.label)}</b><div class="sub">a partir de ${esc(moveLbl)} · lance ${M.i}/${M.moves.length}</div></div></div>
       <p class="seq">${seq}</p>
-      <div class="acts"><button class="btn act" data-act="lprev">◀</button><button class="btn act" data-act="lplay">${M.playing ? '⏸' : '⏵'}</button><button class="btn act" data-act="lnext">▶</button><button class="btn act" data-act="exit">✕ Voltar pra partida</button></div>`
+      <p class="say step">${say}</p>
+      <div class="acts"><button class="btn act" data-act="lprev">◀</button>${end ? '' : `<button class="btn act retry" data-act="lnext">Próximo ▶</button>`}<button class="btn act" data-act="lplay" title="Autoplay (1,5s por lance)">${M.playing ? '⏸ Pausar' : '⏵ Autoplay'}</button><button class="btn act" data-act="exit">✕ Voltar pra partida</button>${end && S.guide ? '<button class="btn act retry" data-act="gnext">⏩ Próximo momento</button>' : ''}</div>`
     return
   }
   const side = p.color === 'w' ? 'Brancas' : 'Pretas'
   let html = `<div class="coach-head"><div class="avatar">↻</div><div><b>Tentar de novo: ${esc(moveLbl)}</b><div class="sub">Você joga de ${side}. Arrasta a peça (ou clica nela e depois na casa).</div></div></div>`
-  if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${esc(M.msg)}</p>`
-  else html += `<p class="say">Na partida você jogou ${esc(p.san)}. Acha um lance melhor?</p>`
+  if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
+  else html += `<p class="say">${M.prompt ? esc(M.prompt) : `Na partida você jogou ${esc(p.san)}. Acha um lance melhor?`}</p>`
   html += `<div class="acts">`
   if (!M.solved) {
     if (!M.hint) html += `<button class="btn act" data-act="hint">💡 Dica</button>`
     html += `<button class="btn act" data-act="reveal">Mostrar resposta</button>`
-  } else html += `<button class="btn act" data-act="best">▶ Ver a linha</button><button class="btn act" data-act="nexterr">Próximo erro ▶</button>`
+  } else html += `<button class="btn act" data-act="best">▶ Explicar a linha</button>${S.guide ? '<button class="btn act retry" data-act="gnext">⏩ Próximo momento</button>' : ''}`
   html += `<button class="btn act" data-act="exit">✕ Voltar pra partida</button></div>`
   box.innerHTML = html
 }
 function onCoachAction(e) {
+  const vb = e.target.closest('[data-vis]')
+  if (vb) {
+    const i = +vb.dataset.vis
+    if (S.overlayIdx === i) { S.overlay = null; S.overlayIdx = null } else { S.overlay = S.lastVisuals[i]; S.overlayIdx = i }
+    return render()
+  }
   const b = e.target.closest('[data-act]')
   const lm = e.target.closest('.lm')
+  if (b && ['gstart', 'gauto', 'gskip', 'gnext', 'gprev', 'gstop'].includes(b.dataset.act)) return guideAction(b.dataset.act)
   if (b && S.mode?.type === 'explore') {
     const act = b.dataset.act, v = S.mode
     if (act === 'xbest') { const u = anFor(v.fens[v.i])?.lines?.[0]?.pv?.[0]; if (u) exploreMove(u); return }
@@ -852,18 +909,91 @@ function onCoachAction(e) {
   else if (act === 'exit') exitMode()
   else if (act === 'lprev') lineStep(-1)
   else if (act === 'lnext') lineStep(1)
-  else if (act === 'lplay') {
-    const M = S.mode
-    if (M.playing) { stopTimer(); M.playing = false; render() }
-    else { if (M.i >= M.moves.length) M.i = 0; M.playing = true; render(); M.timer = setInterval(() => { if (S.mode !== M) return clearInterval(M.timer); if (M.i >= M.moves.length) { clearInterval(M.timer); M.timer = null; M.playing = false; return render() } M.i++; render() }, 900) }
-  } else if (act === 'hint') { S.mode.hint = S.cls[k].bestUci.slice(0, 2); S.mode.msg = `Dica: a peça certa está em ${S.mode.hint}.`; S.mode.ok = null; render() }
+  else if (act === 'lplay') lineAutoplay()
+  else if (act === 'hint') { S.mode.hint = S.cls[k].bestUci.slice(0, 2); S.mode.msg = `Dica: a peça certa está em ${S.mode.hint}.`; S.mode.ok = null; render() }
   else if (act === 'reveal') {
     const M = S.mode, best = S.cls[k].bestUci, c = S.game.plies[k].color
     const bm = R.lineMotif(M.fen, S.sf[k].lines[0], c)
     const ex = R.explainBestMove(M.fen, S.sf[k].lines[0], c, bm, S.threats[k])
     Object.assign(M, { solved: best, ok: null, wrong: null, sel: null, msg: `O lance era ${bm.san}${ex ? ': ' + ex : ''}.` })
     render()
-  } else if (act === 'nexterr') { exitMode(); jumpError(1) }
+  }
+}
+
+// ── Key moments, guided review and autoplay to the next moment ──────────────
+function keyMoments() {
+  const g = S.game, out = []
+  S.cls.forEach((r, k) => {
+    if (!r) return
+    const p = g.plies[k], mine = p.color === S.side
+    if (mine && ['mistake', 'blunder', 'miss'].includes(r.cls)) out.push({ k, at: k, type: 'erro', label: `${R.CLASSES[r.cls].label}: ${moveName(k)}` })
+    else if (mine && ['brilliant', 'great'].includes(r.cls)) out.push({ k, at: k + 1, type: 'bom', label: `${R.CLASSES[r.cls].label}: ${moveName(k)}` })
+    else if (!mine && ['mistake', 'blunder'].includes(r.cls) && g.plies[k + 1] && S.cls[k + 1]) out.push({ k, at: k + 1, type: 'chance', label: `Erro do adversário: ${moveName(k)}` })
+  })
+  const seen = new Set()
+  return out.sort((a, b) => a.at - b.at).filter((m) => (seen.has(m.at) ? false : seen.add(m.at)))
+}
+function moveName(k) { const p = S.game.plies[k]; return `${Math.floor(k / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}` }
+function stopAuto() { if (S.auto) { clearInterval(S.auto.timer); S.auto = null; renderGuide() } }
+function baseIdx() { const M = S.mode; return M?.type === 'explore' ? M.fromIdx : M?.type === 'line' ? (M.endIdx ?? M.k) : M?.type === 'retry' ? M.k : S.idx }
+// Autoplay the game (1.5s per move) up to the next key moment, then open it.
+function autoToNextMoment() {
+  if (S.auto) return stopAuto()
+  const base = baseIdx()
+  if (S.mode) { stopTimer(); S.mode = null; go(base, true) }
+  const target = keyMoments().find((m) => m.at > base)
+  if (!target) { S.guideMsg = 'Não tem mais momentos-chave daqui pra frente.'; renderGuide(); return }
+  S.guideMsg = null
+  S.auto = { target, timer: setInterval(() => {
+    if (!S.auto) return
+    if (S.idx < S.auto.target.at) go(S.idx + 1, true)
+    if (S.idx >= S.auto.target.at) { const t = S.auto.target; clearInterval(S.auto.timer); S.auto = null; openMoment(t) }
+    renderGuide()
+  }, 1500) }
+  renderGuide()
+}
+function openMoment(m) {
+  if (S.guide && m.type === 'erro') { go(m.k, true); startRetry(m.k, `Momento-chave: na partida você jogou ${S.game.plies[m.k].san} aqui (${R.CLASSES[S.cls[m.k].cls].label.toLowerCase()}). Acha um lance melhor?`) }
+  else if (S.guide && m.type === 'chance') { go(m.k + 1, true); startRetry(m.k + 1, `O adversário errou com ${S.game.plies[m.k].san}. Acha a punição!`) }
+  else go(m.at, true)
+  renderGuide()
+}
+function guideAction(act) {
+  const ms = keyMoments()
+  if (act === 'gstart') { S.guide = true; S.guideMsg = null; if (S.mode) { stopTimer(); S.mode = null } go(0, true); autoToNextMoment() }
+  else if (act === 'gstop') { S.guide = false; stopAuto(); S.guideMsg = null; render() }
+  else if (act === 'gauto' || act === 'gnext') autoToNextMoment()
+  else if (act === 'gskip' || act === 'gprev') {
+    stopAuto()
+    const base = baseIdx()
+    const t = act === 'gskip' ? ms.find((m) => m.at > base) : [...ms].reverse().find((m) => m.at < base)
+    if (!t) { S.guideMsg = act === 'gskip' ? 'Não tem mais momentos-chave daqui pra frente.' : 'Esse é o primeiro momento-chave.'; return renderGuide() }
+    if (S.mode) { stopTimer(); S.mode = null }
+    openMoment(t)
+  }
+}
+function renderGuide() {
+  const el = $('#guide'); if (!el || !S.game) return
+  const ms = S.cls.length && !S.cls.some((x) => !x) ? keyMoments() : []
+  const ready = ms.length > 0
+  const base = baseIdx()
+  const cur = ms.findIndex((m) => m.at === base)
+  const nextM = ms.find((m) => m.at > base)
+  let html = ''
+  if (S.guide) html += `<div class="g-top"><b>🎓 Revisão guiada</b><span class="muted">${cur >= 0 ? `momento ${cur + 1} de ${ms.length}: ${esc(ms[cur].label)}` : nextM ? `próximo: ${esc(nextM.label)}` : 'fim dos momentos-chave'}</span></div>`
+  else if (ready) html += `<div class="g-top"><span class="muted">${ms.length} momentos-chave nesta partida${nextM ? ` · próximo: ${esc(nextM.label)}` : ''}</span></div>`
+  if (S.guideMsg) html += `<div class="muted">${esc(S.guideMsg)}</div>`
+  html += `<div class="acts">`
+  if (!S.guide && ready) html += `<button class="btn act retry" data-act="gstart">🎓 Revisão guiada</button>`
+  if (ready) {
+    html += `<button class="btn act" data-act="gprev" title="Momento anterior">⏮ momento</button>`
+    html += `<button class="btn act${S.auto ? ' on' : ''}" data-act="gauto" title="Autoplay da partida até o próximo momento-chave (1,5s por lance)">${S.auto ? '⏸ Pausar autoplay' : '⏩ Autoplay até o próximo momento'}</button>`
+    html += `<button class="btn act" data-act="gskip" title="Pular direto pro próximo momento">⏭ momento</button>`
+  }
+  if (S.guide) html += `<button class="btn act" data-act="gstop">✕ Sair da guiada</button>`
+  html += `</div>`
+  el.innerHTML = ready || S.guide ? html : ''
+  el.hidden = !(ready || S.guide)
 }
 
 // ── Move list / graph / summary ─────────────────────────────────────────────
@@ -966,11 +1096,13 @@ function renderSummary() {
 
 function render() {
   if (!S.game) return
-  renderBoard(); renderCoach(); renderMoveList(); renderGraph()
+  renderBoard(); renderCoach(); renderMoveList(); renderGraph(); renderGuide()
   $('#counter').textContent = S.mode?.type === 'explore' ? 'variante' : `${S.idx}/${S.game.plies.length}`
 }
-function go(i) {
+function go(i, internal) {
   S.sel = null
+  S.overlay = null; S.overlayIdx = null; S.hover = null
+  if (!internal) stopAuto()
   if (S.mode) { stopTimer(); S.mode = null }
   S.idx = Math.max(0, Math.min(S.game.plies.length, i))
   render()
@@ -1012,13 +1144,15 @@ function init() {
   $('#prev').onclick = () => navStep(-1)
   $('#next').onclick = () => navStep(1)
   $('#last').onclick = () => navEnd()
-  $('#prevErr').onclick = () => jumpError(-1)
-  $('#nextErr').onclick = () => jumpError(1)
+  $('#prevErr').onclick = () => guideAction('gprev')
+  $('#nextErr').onclick = () => guideAction('gauto')
   $('#flip').onclick = () => { S.flip = !S.flip; render() }
   $('#showBest').onchange = render
   $('#showNext').onchange = render
   $('#graph').onclick = graphClick
   $('#coach').onclick = onCoachAction
+  $('#guide').onclick = onCoachAction
+  for (const id of ['#coach', '#guide']) { $(id).addEventListener('mouseover', onRefOver); $(id).addEventListener('mouseout', onRefOut) }
   const bd = $('#board')
   bd.addEventListener('pointerdown', onPointerDown)
   bd.addEventListener('pointermove', onPointerMove)
