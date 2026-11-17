@@ -10,8 +10,8 @@ import base64, json
 m = {}
 for c in 'wb':
     for t in 'KQRBNP':
-        data = open(f'assets/pieces-staunty/{c}{t}.svg', 'rb').read()
-        m[c + t] = 'data:image/svg+xml;base64,' + base64.b64encode(data).decode()
+        data = open(f'assets/pieces-hera/{c}{t}.png', 'rb').read()
+        m[c + t] = 'data:image/png;base64,' + base64.b64encode(data).decode()
 open('src/pieces.gen.js', 'w').write('export default ' + json.dumps(m))
 EOF
 
@@ -36,7 +36,7 @@ if [ ! -f dist/maia3.part2.wasm ] || [ assets/maia3_simplified.onnx -nt dist/mai
 fi
 
 # Node bundles used by the tests
-for f in review uci maia-core puzzles; do
+for f in review uci maia-core puzzles library; do
   npx esbuild src/$f.js --bundle --format=esm --platform=node --outfile=build/$f.node.mjs --log-level=warning
 done
 

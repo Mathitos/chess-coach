@@ -7,6 +7,7 @@ import * as R from '../build/review.node.mjs'
 import { Uci } from '../build/uci.node.mjs'
 import { preprocess, postprocess } from '../build/maia-core.node.mjs'
 import * as P from '../build/puzzles.node.mjs'
+import * as L from '../build/library.node.mjs'
 
 const require = createRequire(import.meta.url)
 const read = (f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')
@@ -110,6 +111,22 @@ describe('engine (Stockfish) + classificação', () => {
     }
   })
 
+  test('resumo da partida: erros por categoria (Nf7 deixou mate)', { timeout: 240000 }, async () => {
+    const pgn = read('game2.pgn')
+    const r = await review(pgn, 10)
+    const k = r.game.plies.findIndex((p) => p.san === 'Nf7')
+    const side = r.game.plies[k].color
+    const sum = L.summarize({ ...r, side, clock: R.clockData(r.game, pgn) }, pgn, { site: 'chesscom', depth: 'fast', accuracy: R.gameAccuracy(r.game, r.infos, r.cls) })
+    const e = sum.errors.find((x) => x.k === k)
+    assert.equal(e.cat, 'mateAllowed')
+    assert.ok(sum.errors.every((x) => r.game.plies[x.k].color === side))
+    assert.ok(sum.pgn && sum.id && typeof sum.accuracy === 'number')
+    const ag = L.aggregate({ [sum.id]: sum })
+    assert.equal(ag.n, 1)
+    assert.equal(ag.top.reduce((a, c) => a + c.n, 0), sum.errors.length)
+    assert.ok(ag.top.some((c) => c.cat === 'mateAllowed' && c.label))
+  })
+
   test('16.Qxh5 (entrega a dama por um bispo) é no mínimo erro', { timeout: 240000 }, async () => {
     const r = await review(read('game.pgn'), 10)
     const k = r.game.plies.findIndex((p) => p.san === 'Qxh5')
@@ -199,5 +216,42 @@ describe('desafios salvos', () => {
     // apagar num aparelho não ressuscita no outro
     const m2 = P.mergeStores(m, b)
     assert.equal(m2.puzzles.y, undefined)
+  })
+})
+
+describe('minhas partidas (busca e ids)', () => {
+  const fake = (routes) => async (url) => {
+    const hit = Object.entries(routes).find(([k]) => url.startsWith(k))
+    if (!hit) return { ok: false, status: 404 }
+    const body = hit[1]
+    return { ok: true, status: 200, json: async () => body, text: async () => body }
+  }
+  test('chess.com: meses do mais novo pro mais velho, partidas mais recentes primeiro', async () => {
+    const f = fake({
+      'https://api.chess.com/pub/player/fulano/games/archives': { archives: ['https://api.chess.com/pub/player/fulano/games/2026/10', 'https://api.chess.com/pub/player/fulano/games/2026/11'] },
+      'https://api.chess.com/pub/player/fulano/games/2026/11': { games: [{ pgn: 'A', end_time: 1, rules: 'chess' }, { pgn: 'B', end_time: 3, rules: 'chess' }, { pgn: 'X', end_time: 4, rules: 'chess960' }] },
+      'https://api.chess.com/pub/player/fulano/games/2026/10': { games: [{ pgn: 'C', end_time: 0, rules: 'chess' }] },
+    })
+    const out = await L.fetchRecent('chesscom', 'Fulano', 3, f)
+    assert.deepEqual(out.map((x) => x.pgn), ['B', 'A', 'C'])
+    await assert.rejects(L.fetchRecent('chesscom', 'ninguem', 3, f), /não achei/)
+  })
+  test('Lichess: PGN com várias partidas', async () => {
+    const two = '[Event "a"]\n[Site "https://lichess.org/abc12345"]\n\n1. e4 e5 1-0\n\n\n[Event "b"]\n[Site "https://lichess.org/def67890"]\n\n1. d4 d5 0-1\n'
+    const out = await L.fetchRecent('lichess', 'fulano', 5, fake({ 'https://lichess.org/api/games/user/fulano': two }))
+    assert.equal(out.length, 2)
+    assert.equal(L.gameId(R.gameSummary(out[0].pgn), out[0].pgn), 'lichess.org/abc12345')
+  })
+  test('id da partida e lado do jogador', () => {
+    assert.equal(L.gameId({ Link: 'https://www.chess.com/game/live/123' }, ''), 'chess.com/game/live/123')
+    assert.equal(L.gameId({}, '1. e4 e5'), L.gameId({}, '1.  e4   e5'))
+    assert.equal(L.sideFor({ White: 'A', Black: 'Fulano' }, 'fulano'), 'b')
+    assert.equal(L.sideFor({ White: 'A', Black: 'B' }, 'c'), null)
+  })
+  test('merge guarda as partidas analisadas dos dois aparelhos', () => {
+    const a = P.emptyStore(), b = P.emptyStore()
+    a.games.x = { id: 'x', analyzedAt: 1, depth: 'fast' }; b.games.x = { id: 'x', analyzedAt: 2, depth: 'deep' }; b.games.y = { id: 'y', analyzedAt: 1 }
+    const m = P.mergeStores(a, b)
+    assert.equal(m.games.x.depth, 'deep'); assert.ok(m.games.y)
   })
 })

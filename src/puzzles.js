@@ -11,7 +11,7 @@ export function puzzleId(fen, uci) {
   return 'p' + h.toString(36)
 }
 
-export function emptyStore() { return { v: 1, updatedAt: 0, puzzles: {}, deleted: {} } }
+export function emptyStore() { return { v: 1, updatedAt: 0, puzzles: {}, deleted: {}, games: {} } }
 
 // Union of two stores: newest version of each puzzle wins; deletions win over older edits.
 export function mergeStores(a, b) {
@@ -23,6 +23,11 @@ export function mergeStores(a, b) {
     if (!cur || (p.updatedAt || 0) > (cur.updatedAt || 0)) out.puzzles[id] = p
   }
   for (const [id, ts] of Object.entries(out.deleted)) if (out.puzzles[id] && (out.puzzles[id].updatedAt || 0) <= ts) delete out.puzzles[id]
+  // partidas analisadas (resumo + PGN): a análise mais recente de cada uma vence
+  for (const src of [a, b]) for (const [id, g] of Object.entries(src.games || {})) {
+    const cur = out.games[id]
+    if (!cur || (g.analyzedAt || 0) > (cur.analyzedAt || 0)) out.games[id] = g
+  }
   out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0)
   return out
 }

@@ -17,6 +17,10 @@ Cola a partida do jeito que o chess.com ou o Lichess compartilham (PGN com ou se
 - mostra o **relógio** de cada jogador em cada momento e o **tempo gasto** em cada lance (a partir do `[%clk]` do PGN);
 - **explorar variantes**: arrasta qualquer peça pra testar lances, com avaliação e classificação do Stockfish;
 - exporta o **PGN anotado** com os comentários.
+- **Minhas partidas** (⚙ no canto de cima): busca suas partidas recentes no chess.com ou no Lichess pelas APIs públicas (sem login nesses sites), analisa em lote começando pelas mais recentes, mostra o progresso e deixa cancelar sem perder as que já terminaram. O card **Seus padrões** agrega os tipos de erro mais frequentes (deixou mate, mate que passou, não puniu o adversário, entregou material, tática que passou, abertura, posicional, e quantos foram com pouco tempo);
+- **Desafios**: seus erros e as chances de punir viram desafios com revisão espaçada, salvos no seu Google Drive (pasta oculta do app). No fim de cada desafio aparece de qual partida ele veio, com link pra partida original.
+
+**Sessão do Google.** O app não tem backend, então usa o fluxo de token do Google Identity Services: o token vale ~1h e o Google não entrega refresh token pra app só de navegador. O app guarda o token enquanto ele vale (recarregar a página não pede login), renova no primeiro clique quando faltam menos de 10 min e, se já venceu, no próximo clique (o popup do Google abre e fecha sozinho). A conta fica lembrada até você clicar em Sair.
 
 Links do chess.com são buscados pela [API pública](https://www.chess.com/news/view/published-data-api) no arquivo do usuário informado (últimos 3 meses); links do Lichess pela API de export. Isso depende de CORS do navegador, então não funciona dentro do claude.ai, só na versão hospedada.
 
@@ -96,5 +100,5 @@ test/             partidas de exemplo, testes unitários (node:test) e end-to-en
 - [Maia-3](https://www.maiachess.com/) e o pré-processamento portado de [CSSLab/maia-platform-frontend](https://github.com/CSSLab/maia-platform-frontend): GPL-3.0. Modelo `maia3_simplified.onnx` do mesmo repositório.
 - [onnxruntime-web](https://github.com/microsoft/onnxruntime): MIT.
 - [chess.js](https://github.com/jhlywa/chess.js): BSD-2-Clause.
-- Peças **Staunty** por sadsnake1, via [Lichess](https://github.com/lichess-org/lila/blob/master/COPYING.md): [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) (uso não comercial).
+- Peças **Hera** por Toan Hoang ([HollowLeaf1981/ChessPieces](https://github.com/HollowLeaf1981/ChessPieces)): [MIT](assets/pieces-hera/LICENSE).
 - Curva de chance de vitória e fórmula de precisão: [Lichess](https://lichess.org/page/accuracy).

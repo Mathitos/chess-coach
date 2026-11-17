@@ -48,6 +48,7 @@ export async function signIn(hintEmail) {
   })
 }
 export function signedIn() { return !!token && Date.now() < tokenExp }
+export function expiresIn() { return token ? tokenExp - Date.now() : 0 }
 export function signOut() {
   if (token && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(token, () => {})
   token = null; tokenExp = 0; fileId = null

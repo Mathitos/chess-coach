@@ -4,6 +4,7 @@ import * as R from './review.js'
 import PIECES from './pieces.gen.js'
 import * as P from './puzzles.js'
 import * as G from './gdrive.js'
+import * as L from './library.js'
 
 const $ = (s) => document.querySelector(s)
 const store = {
@@ -195,6 +196,8 @@ async function start() {
   } else pgn = d.games[Math.min(S.gameIdx || 0, d.games.length - 1)]
   let game
   try { game = R.parseGame(pgn) } catch (e) { $('#err').textContent = 'Não consegui ler esse PGN: ' + e.message; return }
+  if (S.batch?.running) cancelBatch('Pausei a análise em lote pra você revisar essa partida. Clica em Analisar pra continuar de onde parou.')
+  S.pgn = pgn; S.pgnSite = d.kind === 'link' ? d.site : /lichess\.org/.test(pgn) ? 'lichess' : /chess\.com/i.test(pgn) ? 'chesscom' : ''
   if (!game.plies.length) { $('#err').textContent = 'O PGN não tem lances.'; return }
   const h = game.headers
   let side = (d.kind === 'pgn' && S.pick) || autoSide(h) || 'w'
@@ -275,6 +278,8 @@ async function runStockfish(runId) {
   const secs = Math.round((performance.now() - t0) / 1000)
   status('sf', `pronto · ${n} posições em ${secs}s`)
   banner({ done: true, sf: `Análise pronta em ${secs}s` })
+  learnSpeed($('#depth').value, (performance.now() - t0) / 1000 / n)
+  recordGame(S, S.pgn, S.pgnSite, $('#depth').value)
   renderSummary()
   render()
 }
@@ -934,19 +939,19 @@ function onCoachAction(e) {
 }
 
 // ── Key moments, guided review and autoplay to the next moment ──────────────
-function keyMoments() {
-  const g = S.game, out = []
-  S.cls.forEach((r, k) => {
+function keyMoments(A = S) {
+  const g = A.game, out = []
+  A.cls.forEach((r, k) => {
     if (!r) return
-    const p = g.plies[k], mine = p.color === S.side
-    if (mine && ['mistake', 'blunder', 'miss'].includes(r.cls)) out.push({ k, at: k, type: 'erro', label: `${R.CLASSES[r.cls].label}: ${moveName(k)}` })
-    else if (mine && ['brilliant', 'great'].includes(r.cls)) out.push({ k, at: k + 1, type: 'bom', label: `${R.CLASSES[r.cls].label}: ${moveName(k)}` })
-    else if (!mine && ['mistake', 'blunder'].includes(r.cls) && g.plies[k + 1] && S.cls[k + 1]) out.push({ k, at: k + 1, type: 'chance', label: `Erro do adversário: ${moveName(k)}` })
+    const p = g.plies[k], mine = p.color === A.side
+    if (mine && ['mistake', 'blunder', 'miss'].includes(r.cls)) out.push({ k, at: k, type: 'erro', label: `${R.CLASSES[r.cls].label}: ${moveName(k, g)}` })
+    else if (mine && ['brilliant', 'great'].includes(r.cls)) out.push({ k, at: k + 1, type: 'bom', label: `${R.CLASSES[r.cls].label}: ${moveName(k, g)}` })
+    else if (!mine && ['mistake', 'blunder'].includes(r.cls) && g.plies[k + 1] && A.cls[k + 1]) out.push({ k, at: k + 1, type: 'chance', label: `Erro do adversário: ${moveName(k, g)}` })
   })
   const seen = new Set()
   return out.sort((a, b) => a.at - b.at).filter((m) => (seen.has(m.at) ? false : seen.add(m.at)))
 }
-function moveName(k) { const p = S.game.plies[k]; return `${Math.floor(k / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}` }
+function moveName(k, g = S.game) { const p = g.plies[k]; return `${Math.floor(k / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}` }
 function stopAuto() { if (S.auto) { clearInterval(S.auto.timer); S.auto = null; renderGuide() } }
 function baseIdx() { const M = S.mode; return M?.type === 'explore' ? M.fromIdx : M?.type === 'line' ? (M.endIdx ?? M.k) : M?.type === 'retry' ? M.k : S.idx }
 // Autoplay the game (1.5s per move) up to the next key moment, then open it.
@@ -1017,8 +1022,27 @@ function loadLocal() { S.store = P.mergeStores(P.emptyStore(), store.get(localKe
 function saveLocal() { store.set(localKey(), S.store) }
 let syncT = null
 function changed() { saveLocal(); renderAcct(); clearTimeout(syncT); syncT = setTimeout(syncDrive, 800) }
+// O Google não dá refresh token pra app só de navegador: o access token dura ~1h.
+// Pra não cair no meio do uso, renova no primeiro clique quando faltam <10 min
+// (o popup do Google abre e fecha sozinho) e, se já venceu, no próximo clique.
+let renewArmed = false, renewTimer = null
+function armRenew() {
+  if (renewArmed || !S.account || !G.available()) return
+  renewArmed = true
+  const renew = (e) => {
+    if (!S.account || e.target.closest('[data-acct]')) return
+    document.removeEventListener('pointerdown', renew, true); renewArmed = false
+    googleLogin() // sem re-render aqui pra não engolir o clique em andamento
+  }
+  document.addEventListener('pointerdown', renew, true)
+}
+function scheduleRenew() {
+  clearTimeout(renewTimer)
+  const ms = G.expiresIn() - 10 * 60 * 1000
+  renewTimer = setTimeout(armRenew, Math.max(0, ms))
+}
 async function syncDrive() {
-  if (!G.signedIn()) return
+  if (!G.signedIn()) { if (S.account) { armRenew(); S.syncMsg = 'sincroniza no próximo clique'; renderAcct() } return }
   S.syncMsg = 'sincronizando…'; renderAcct()
   try {
     const remote = await G.load()
@@ -1040,8 +1064,9 @@ async function googleLogin() {
     loadLocal()
     if (anon) { S.store = P.mergeStores(S.store, anon); store.set('puzzles.local', null) } // adota desafios salvos antes do login
     saveLocal()
+    scheduleRenew()
     await syncDrive()
-  } catch (e) { S.syncMsg = 'login: ' + e.message; renderAcct() }
+  } catch (e) { S.syncMsg = 'login: ' + e.message; renderAcct(); if (S.account) armRenew() }
 }
 function googleLogout() {
   G.signOut(); S.account = null; store.set('account', null); S.syncMsg = null
@@ -1079,6 +1104,7 @@ function puzzleWhen(p, now = Date.now()) {
   return d <= 0 ? 'hoje' : d === 1 ? 'amanhã' : `em ${d} dias`
 }
 function renderHome() {
+  renderStats()
   const el = $('#chal'); if (!el) return
   const head = `<div class="ch-head">${TARGET}<h2>Meus desafios</h2></div>`
   const needLogin = G.available() && !S.account
@@ -1125,23 +1151,25 @@ function goHome() {
   stopAuto(); stopTimer(); S.runId++; resetStockfish(); show('setup'); renderAcct()
 }
 
-function makePuzzles() {
-  const g = S.game, h = g.headers, out = []
-  for (const m of keyMoments()) {
+function makePuzzles(A = S) {
+  const g = A.game, h = g.headers, out = []
+  const gid = L.gameId(h, A.pgn || '')
+  for (const m of keyMoments(A)) {
     if (m.type !== 'erro' && m.type !== 'chance') continue
     const kt = m.type === 'erro' ? m.k : m.k + 1
-    const line = S.sf[kt]?.lines?.[0], info = S.infos[kt]
+    const line = A.sf[kt]?.lines?.[0], info = A.infos[kt]
     if (!line || !line.pv.length || !info) continue
     const fen = g.positions[kt], color = g.plies[kt].color
     const motif = R.lineMotif(fen, line, color)
     out.push({
       id: P.puzzleId(fen, line.pv[0]), fen, best: line.pv[0], bestSan: motif.san, pv: line.pv.slice(0, 8), color,
       wpBefore: color === 'w' ? info.wpW : 100 - info.wpW, type: m.type,
-      idea: R.explainBestMove(fen, line, color, motif, S.threats[kt]),
-      prompt: m.type === 'erro' ? `Na partida você jogou ${g.plies[kt].san} aqui (${R.CLASSES[S.cls[kt].cls].label.toLowerCase()}). Ache um lance melhor.` : `O adversário acabou de jogar ${g.plies[m.k].san}. Ache a punição!`,
+      idea: R.explainBestMove(fen, line, color, motif, A.threats[kt]),
+      prompt: m.type === 'erro' ? `Na partida você jogou ${g.plies[kt].san} aqui (${R.CLASSES[A.cls[kt].cls].label.toLowerCase()}). Ache um lance melhor.` : `O adversário acabou de jogar ${g.plies[m.k].san}. Ache a punição!`,
+      ply: kt,
       played: g.plies[kt].san, oppSan: kt > 0 ? g.plies[kt - 1].san : undefined,
       last: kt > 0 ? { from: g.plies[kt - 1].from, to: g.plies[kt - 1].to } : null, prevFen: kt > 0 ? g.positions[kt - 1] : null,
-      game: { white: h.White || '', black: h.Black || '', date: h.Date || '', result: h.Result || '', link: h.Link || h.Site || '' },
+      game: { id: gid, white: h.White || '', black: h.Black || '', date: h.UTCDate || h.Date || '', result: h.Result || '', link: h.Link || h.Site || '' },
     })
   }
   return out
@@ -1152,6 +1180,219 @@ function savePuzzles() {
   S.savedFor = S.game
   S.savedMsg = n ? `${n} desafio${n > 1 ? 's' : ''} salvo${n > 1 ? 's' : ''} ✓` : 'esses desafios já estavam salvos ✓'
   changed(); renderGuide()
+}
+
+
+// ── Minhas partidas: análise em lote, resumo e padrões de erro ─────────────
+const SPP_DEFAULT = { fast: 0.35, normal: 1.1, deep: 2.6 } // segundos por posição (com o pool), ajusta com o uso
+function secPerPos(depth) { return store.get('spp.' + depth, SPP_DEFAULT[depth] || 1) }
+function learnSpeed(depth, spp) { if (spp > 0 && spp < 60) store.set('spp.' + depth, Math.round((secPerPos(depth) * 0.6 + spp * 0.4) * 1000) / 1000) }
+const fmtDur = (s) => (s < 90 ? `${Math.max(5, Math.round(s / 5) * 5)}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)}h${String(Math.round((s % 3600) / 60)).padStart(2, '0')}`)
+const AVG_POS = 80 // posições numa partida típica (~40 lances)
+
+function recordGame(A, pgn, site, depth) {
+  if (!pgn || !A.game?.plies?.length || !S.store) return null
+  try {
+    const acc = R.gameAccuracy(A.game, A.infos, A.cls)
+    const sum = L.summarize(A, pgn, { site, depth, accuracy: acc })
+    S.store.games[sum.id] = sum
+    S.store.updatedAt = Date.now()
+    changed()
+    return sum
+  } catch (e) { console.warn('resumo da partida falhou', e); return null }
+}
+
+// Análise sem UI (mesma lógica do runStockfish), pra rodar em lote
+async function analyzeGame(pgn, side, opt, engines, alive, onPos) {
+  const game = R.parseGame(pgn)
+  const n = game.positions.length
+  const sf = new Array(n), threats = new Array(game.plies.length)
+  let next = 0, done = 0
+  const loop = async (eng) => {
+    for (;;) {
+      if (!alive()) return
+      const i = next++
+      if (i >= n) return
+      const fen = game.positions[i]
+      const ch = new Chess(fen)
+      sf[i] = ch.isGameOver() ? { lines: [] } : await eng.u.analyse(fen, { ...opt, multipv: 2 })
+      if (!alive()) return
+      if (i < game.plies.length && !ch.isGameOver() && !ch.inCheck()) {
+        try { threats[i] = R.describeThreat(fen, await eng.u.analyse(R.nullMoveFen(fen), { depth: 10, movetime: 300 }), R.evalInfo(fen, sf[i]), game.plies[i].color) } catch { threats[i] = null }
+      }
+      done++; onPos?.(done, n)
+    }
+  }
+  await Promise.all(engines.map(loop))
+  if (!alive()) return null
+  const sfx = sf.map((x) => x || { lines: [] })
+  const cls = R.classify(game, sfx)
+  const infos = game.positions.map((f, i) => R.evalInfo(f, sfx[i]))
+  return { game, sf: sfx, threats, infos, cls, side, pgn, clock: R.clockData(game, pgn) }
+}
+
+function libSettings() { return { user: '', site: 'chesscom', count: 10, gen: true, ...store.get('lib', {}) } }
+let batchEngines = []
+function stopBatchEngines() { for (const e of batchEngines) e.w.terminate(); batchEngines = [] }
+function cancelBatch(msg) {
+  const B = S.batch; if (!B?.running) return
+  B.cancel = true; B.running = false
+  stopBatchEngines()
+  B.msg = msg || (B.done ? `Cancelado. As partidas já analisadas (${B.done} de ${B.total}) ficaram salvas.` : 'Cancelado.')
+  renderBatchUi()
+}
+async function runBatch() {
+  const cfg = libSettings()
+  const depth = $('#sDepth')?.value || 'deep'
+  const opt = DEPTHS[depth]
+  const canGen = !!S.account && cfg.gen
+  const B = S.batch = { running: true, cancel: false, done: 0, total: 0, skipped: 0, newPuzzles: 0, cur: null, pos: 0, posN: 0, msg: 'Buscando partidas…', depth }
+  const alive = () => S.batch === B && !B.cancel
+  renderBatchUi()
+  let list
+  try { list = await L.fetchRecent(cfg.site, cfg.user, cfg.count) } catch (e) {
+    const blocked = e instanceof TypeError
+    B.running = false; B.error = true
+    B.msg = blocked ? `Não consegui falar com o ${L.SITES[cfg.site]} (o navegador bloqueou a conexão; no claude.ai isso não funciona, só na versão do GitHub Pages).` : 'Não consegui buscar as partidas: ' + e.message
+    return renderBatchUi()
+  }
+  if (!alive()) return
+  const todo = []
+  for (const { pgn } of list) {
+    const h = R.gameSummary(pgn)
+    const id = L.gameId(h, pgn), side = L.sideFor(h, cfg.user)
+    if (!side) continue
+    if (S.store.games[id]) { B.skipped++; continue }
+    todo.push({ pgn, h, id, side })
+  }
+  B.total = todo.length
+  if (!todo.length) { B.running = false; B.msg = list.length ? `As ${list.length} partidas mais recentes já estavam analisadas.` : 'Não achei partidas desse jogador.'; return renderBatchUi() }
+  B.msg = null
+  stopBatchEngines()
+  batchEngines = Array.from({ length: POOL_SIZE }, makeEngine)
+  try { await Promise.all(batchEngines.map((e) => e.ready)) } catch (e) { B.running = false; B.error = true; B.msg = 'O Stockfish não carregou: ' + e.message; return renderBatchUi() }
+  for (const t of todo) { // mais recentes primeiro
+    if (!alive()) return
+    B.cur = t.h; B.pos = 0; B.posN = 0; renderBatchUi()
+    const t0 = performance.now()
+    let A
+    try { A = await analyzeGame(t.pgn, t.side, opt, batchEngines, alive, (d, n) => { B.pos = d; B.posN = n; renderBatchUi(true) }) } catch (e) { console.warn('partida pulada', e); B.done++; continue }
+    if (!A) return // cancelado no meio: essa partida é descartada, as anteriores ficam
+    learnSpeed(depth, (performance.now() - t0) / 1000 / A.game.positions.length)
+    recordGame(A, t.pgn, cfg.site, depth)
+    if (canGen) B.newPuzzles += P.addPuzzles(S.store, makePuzzles(A))
+    B.done++
+    changed()
+    renderBatchUi()
+  }
+  stopBatchEngines()
+  B.running = false; B.cur = null
+  B.msg = `Pronto: ${B.done} partida${B.done > 1 ? 's' : ''} analisada${B.done > 1 ? 's' : ''}${B.skipped ? ` (${B.skipped} já estava${B.skipped > 1 ? 'm' : ''} analisada${B.skipped > 1 ? 's' : ''})` : ''}${canGen ? ` · ${B.newPuzzles} desafio${B.newPuzzles === 1 ? '' : 's'} novo${B.newPuzzles === 1 ? '' : 's'}` : ''}.`
+  renderBatchUi()
+}
+
+function batchProgressHtml() {
+  const B = S.batch
+  if (!B) return ''
+  if (!B.running) return B.msg ? `<div class="bprog"><span${B.error ? ' style="color:#ff8a7a"' : ''}>${esc(B.msg)}</span></div>` : ''
+  if (!B.total) return `<div class="bprog"><span>${esc(B.msg || 'Preparando…')}</span><button class="btn act" data-lib="cancel">Cancelar</button></div>`
+  const frac = (B.done + (B.posN ? B.pos / B.posN : 0)) / B.total
+  const cur = B.cur ? `${esc(B.cur.White || '?')} x ${esc(B.cur.Black || '?')}${fmtDate(B.cur.UTCDate || B.cur.Date) ? ' · ' + esc(fmtDate(B.cur.UTCDate || B.cur.Date)) : ''}` : ''
+  return `<div class="bprog"><b>${B.done}/${B.total} partidas analisadas</b><div class="bar2"><span style="width:${Math.round(frac * 100)}%"></span></div>${cur ? `<span class="muted">Agora: ${cur} · ${B.pos}/${B.posN || '…'} posições</span>` : ''}${B.skipped ? `<span class="muted">${B.skipped} já estava${B.skipped > 1 ? 'm' : ''} analisada${B.skipped > 1 ? 's' : ''} e ${B.skipped > 1 ? 'foram puladas' : 'foi pulada'}.</span>` : ''}<span class="muted">Pode cancelar: as partidas já analisadas ficam salvas.</span><div><button class="btn act" data-lib="cancel">Cancelar</button></div></div>`
+}
+function fmtDate(d) { const x = String(d || '').split('.'); return x.length === 3 && !/\?/.test(d) ? `${x[2]}/${x[1]}/${x[0].slice(2)}` : '' }
+
+function renderSettings() {
+  const el = $('#settings'); if (!el || el.hidden) return
+  const cfg = libSettings()
+  const running = S.batch?.running
+  const depth = $('#sDepth')?.value || 'deep'
+  const per = secPerPos(depth) * AVG_POS
+  const logged = !!S.account
+  const genTip = logged ? 'Os seus erros e as chances de punir de cada partida viram desafios, salvos no seu Google Drive.' : G.available() ? 'Precisa entrar com o Google pra gerar desafios: eles ficam salvos no seu Google Drive.' : 'Precisa entrar com o Google pra gerar desafios. Aqui no claude.ai o login do Google não funciona; use a versão do GitHub Pages.'
+  el.innerHTML = `<h3>Minhas partidas</h3>
+    <label class="row">Jogador<input type="text" id="sUser" value="${esc(cfg.user)}" placeholder="seu usuário" ${running ? 'disabled' : ''}></label>
+    <div class="row">Site<div class="seg">${Object.entries(L.SITES).map(([k, v]) => `<button class="chip${cfg.site === k ? ' on' : ''}" data-site="${k}" ${running ? 'disabled' : ''}>${v}</button>`).join('')}</div></div>
+    <label class="row"><span>Quantas partidas <span class="hint" tabindex="0" data-tip="~${fmtDur(per)} por partida na profundidade escolhida (estimativa pra uma partida de ~40 lances neste aparelho; melhora com o uso). Começa pelas mais recentes e pula as que já foram analisadas.">?</span></span>
+      <select id="sCount" ${running ? 'disabled' : ''}>${[5, 10, 20, 30, 50].map((n) => `<option${n === +cfg.count ? ' selected' : ''}>${n}</option>`).join('')}</select>
+      <span class="est" id="sEst">~${fmtDur(per)} por partida · ~${fmtDur(per * cfg.count)} no total</span></label>
+    <label class="row">Profundidade<select id="sDepth" ${running ? 'disabled' : ''}><option value="deep"${depth === 'deep' ? ' selected' : ''}>Profunda (padrão)</option><option value="normal"${depth === 'normal' ? ' selected' : ''}>Normal</option><option value="fast"${depth === 'fast' ? ' selected' : ''}>Rápida</option></select></label>
+    <label class="switch${logged ? '' : ' off'}"><input type="checkbox" id="sGen" ${logged && cfg.gen ? 'checked' : ''} ${logged && !running ? '' : 'disabled'}> Gerar desafios <span class="hint" tabindex="0" data-tip="${esc(genTip)}">?</span></label>
+    ${batchProgressHtml()}
+    ${running ? '' : `<button class="btn big green" data-lib="run">Analisar partidas</button>`}`
+}
+function renderBatchUi(light) {
+  const B = S.batch
+  const badge = $('#batchBadge')
+  badge.hidden = !B?.running
+  if (B?.running) badge.textContent = B.total ? `⏳ ${B.done}/${B.total}` : '⏳'
+  if (light && !$('#settings').hidden) { const pr = $('#settings .bprog'); if (pr) { pr.outerHTML = batchProgressHtml(); return } }
+  renderSettings()
+  if (!light) renderStats()
+  else { const pr = $('#stats .bprog'); if (pr) pr.outerHTML = batchProgressHtml() }
+}
+function toggleSettings(force) {
+  const el = $('#settings')
+  el.hidden = force === undefined ? !el.hidden : !force
+  if (!el.hidden) { const u = libSettings(); if (!u.user && $('#user').value.trim()) store.set('lib', { ...u, user: $('#user').value.trim() }); renderSettings() }
+}
+function onSettings(e) {
+  const cfg = libSettings()
+  const site = e.target.closest('[data-site]')
+  if (site) { store.set('lib', { ...cfg, site: site.dataset.site }); return renderSettings() }
+  const b = e.target.closest('[data-lib]'); if (!b) return
+  if (b.dataset.lib === 'cancel') return cancelBatch()
+  if (b.dataset.lib === 'run') {
+    if (!libSettings().user) { $('#sUser').focus(); $('#sUser').style.borderColor = '#fa412d'; return }
+    runBatch()
+  }
+}
+function onSettingsInput(e) {
+  const cfg = libSettings()
+  if (e.target.id === 'sUser') store.set('lib', { ...cfg, user: e.target.value.trim() })
+  else if (e.target.id === 'sCount') { store.set('lib', { ...cfg, count: +e.target.value }); renderSettings() }
+  else if (e.target.id === 'sGen') store.set('lib', { ...cfg, gen: e.target.checked })
+  else if (e.target.id === 'sDepth') renderSettings()
+}
+
+// Card "Seus padrões" na tela inicial
+function renderStats() {
+  const el = $('#stats'); if (!el) return
+  const games = S.store?.games || {}
+  const ag = L.aggregate(games, 20)
+  if (!ag.n && !S.batch) { el.hidden = true; return }
+  el.hidden = false
+  let html = `<div class="ch-head"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#81b64c" stroke-width="2" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><h2>Seus padrões</h2></div>`
+  html += batchProgressHtml()
+  if (ag.n) {
+    html += `<p class="ch-note">${ag.n > 1 ? `Nas suas últimas ${ag.n} partidas analisadas` : 'Na sua última partida analisada'}: ${ag.wins}V ${ag.draws}E ${ag.losses}D${ag.accuracy !== null ? ` · precisão média ${ag.accuracy.toFixed(1)}` : ''} · ${ag.perGame.toFixed(1)} erro${ag.perGame >= 1.95 || ag.perGame < 1 ? 's' : ''} por partida</p>`
+    if (ag.top.length) {
+      const max = ag.top[0].n
+      html += `<div>` + ag.top.map((c) => `<div class="cat" title="${esc(c.tip || '')}"><span>${esc(c.label || c.cat)}</span><b>${c.n}</b><div class="bar2"><span style="width:${Math.round((c.n / max) * 100)}%;background:${c === ag.top[0] ? '#fa412d' : '#81b64c'}"></span></div></div>`).join('') + `</div>`
+      if (ag.zeit) html += `<p class="ch-note">⏱ ${ag.zeit} desses erros foram com pouco tempo no relógio.</p>`
+    } else html += `<p class="ch-note">Nenhum erro grave nessas partidas. 👏</p>`
+    const recent = Object.values(games).sort((a, b) => (b.analyzedAt || 0) - (a.analyzedAt || 0)).slice(0, 5)
+    html += `<ul class="glist">` + recent.map((g) => {
+      const sc = L.scoreFor(g)
+      const opp = g.side === 'w' ? g.black : g.white
+      return `<li data-game="${esc(g.id)}" title="Revisar essa partida"><span class="gres ${sc === 1 ? 'w' : sc === 0 ? 'l' : 'd'}">${sc === 1 ? 'V' : sc === 0 ? 'D' : sc === 0.5 ? 'E' : '?'}</span><span style="flex:1">vs ${esc(opp || '?')}${fmtDate(g.date) ? ` <span class="muted">· ${esc(fmtDate(g.date))}</span>` : ''}</span><span class="muted">${(g.errors || []).length} erro${(g.errors || []).length === 1 ? '' : 's'}${g.accuracy !== null && g.accuracy !== undefined ? ' · ' + g.accuracy.toFixed(0) + '%' : ''}</span></li>`
+    }).join('') + `</ul>`
+  } else if (!S.batch?.running) html += `<p class="ch-note">Analise suas partidas pelo ⚙ no canto de cima pra ver aqui os erros que mais se repetem.</p>`
+  el.innerHTML = html
+}
+function onStatsClick(e) {
+  const c = e.target.closest('[data-lib=cancel]'); if (c) return cancelBatch()
+  const li = e.target.closest('[data-game]'); if (!li) return
+  openStoredGame(li.dataset.game)
+}
+function openStoredGame(id) {
+  const g = S.store?.games?.[id]; if (!g?.pgn) return false
+  if (S.training) { S.training = null; S.trainMode = null; S.mode = null; S.reviewSnapshot = null; document.body.classList.remove('training') }
+  $('#pgn').value = g.pgn
+  updateDetect()
+  S.pick = g.side
+  start()
+  return true
 }
 
 // Training session
@@ -1231,6 +1472,7 @@ function renderPuzzlePanel(box) {
   const p = M.p
   const st = P.stats(S.store)
   const g = p.game
+  let srcHtml = ''
   let html = `<div class="coach-head"><div class="avatar">🎯</div><div><b>Desafio ${T.pos + 1} de ${T.queue.length}</b>${T.extra ? ' <span class="tag">treino extra</span>' : ''}<div class="sub">${esc(g.white)} x ${esc(g.black)}${g.date ? ' · ' + esc(g.date) : ''} · você joga de ${p.color === 'w' ? 'Brancas' : 'Pretas'} · ${st.due} pra revisar · ${st.learned}/${st.total} aprendidos${M.played && !M.wrong && !M.solved ? ' · <span style="color:#ff8a7a">seta vermelha: o lance da partida</span>' : ''}</div></div></div>`
   if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
   else html += `<p class="say">${linkify(p.prompt, [M.fen, p.prevFen])}</p>`
@@ -1241,12 +1483,20 @@ function renderPuzzlePanel(box) {
   } else {
     html += `<button class="btn act retry" data-act="tnext">Próximo desafio ▶</button><button class="btn act" data-act="tline">▶ Explicar a linha</button>`
   }
+  if (M.solved) {
+    const n = +(p.fen.split(' ')[5] || 1)
+    const lance = p.played ? `${n}${p.color === 'w' ? '.' : '...'} ${p.played}` : ''
+    const link = /^https?:\/\//.test(g.link || '') ? g.link : ''
+    const stored = g.id && S.store.games?.[g.id]?.pgn
+    srcHtml = `<div class="src">♟ Esse desafio veio da partida <b>${esc(g.white)} x ${esc(g.black)}</b>${fmtDate(g.date) ? ' · ' + esc(fmtDate(g.date)) : ''}${g.result ? ' · ' + esc(g.result) : ''}${lance ? ` · lance ${esc(lance)}` : ''}.${link ? ` <a href="${esc(link)}" target="_blank" rel="noopener" style="color:#9cc76a">Abrir no ${/lichess/.test(link) ? 'Lichess' : 'chess.com'} ↗</a>` : ''}${stored ? ` <button class="linkbtn" data-act="tgame">Revisar essa partida</button>` : ''}</div>`
+  }
   html += `<button class="btn act" data-act="tdel" title="Remover este desafio">🗑</button><button class="btn act" data-act="texit">Sair do treino</button></div>`
-  box.innerHTML = html
+  box.innerHTML = html + srcHtml
 }
 function trainAction(act) {
   const M = S.trainMode, T = S.training
   if (act === 'texit') return exitTraining()
+  if (act === 'tgame') return openStoredGame(M.p.game.id)
   if (act === 'tagain') { S.training = null; return startTraining() }
   if (act === 'tnext') { T.pos++; return T.pos < T.queue.length ? openPuzzle() : finishTraining() }
   if (act === 'thint') { M.hint = M.p.best.slice(0, 2); M.clean = false; M.msg = `Dica: a peça certa está em ${M.hint}.`; M.ok = null; return render() }
@@ -1412,19 +1662,16 @@ function init() {
   loadLocal()
   $('#trainBtn').onclick = () => (S.training ? exitTraining() : startTraining())
   $('#acct').onclick = (e) => { const b = e.target.closest('[data-acct]'); if (!b) return; b.dataset.acct === 'in' ? googleLogin() : googleLogout() }
+  $('#gear').onclick = (e) => { e.stopPropagation(); toggleSettings() }
+  $('#batchBadge').onclick = (e) => { e.stopPropagation(); toggleSettings(true) }
+  $('#settings').addEventListener('click', onSettings)
+  $('#settings').addEventListener('input', onSettingsInput)
+  $('#settings').addEventListener('change', onSettingsInput)
+  $('#stats').onclick = onStatsClick
+  document.addEventListener('pointerdown', (e) => { if (!$('#settings').hidden && !e.target.closest('#settings,#gear,#batchBadge,.hint')) toggleSettings(false) })
   // Sessão: conta fica lembrada até clicar em Sair. Se o token venceu, renova
   // sozinho no primeiro clique (o Google exige um clique pra abrir o popup).
-  if (S.account && G.available()) {
-    if (G.signedIn()) syncDrive()
-    else {
-      const renew = (e) => {
-        if (G.signedIn() || !S.account || e.target.closest('[data-acct]')) return
-        document.removeEventListener('pointerdown', renew, true)
-        googleLogin() // sem re-render aqui pra não engolir o clique em andamento
-      }
-      document.addEventListener('pointerdown', renew, true)
-    }
-  }
+  if (S.account && G.available()) { if (G.signedIn()) { syncDrive(); scheduleRenew() } else armRenew() }
   document.body.dataset.view = 'setup'
   renderAcct()
   $('#first').onclick = () => go(0)
