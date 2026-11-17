@@ -1,0 +1,6 @@
+node_modules/
+build/
+dist/
+src/pieces.gen.js
+__pycache__/
+.DS_Store

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coach de Xadrez</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#262421;--panel:#312e2b;--panel2:#3c3936;--txt:#e8e6e3;--muted:#9e9b98;--green:#81b64c;--blue:#4a8fd6}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif;font-size:15px}
+button,select,input,textarea{font:inherit;color:inherit}
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid #1d1b19}
+header h1{font-size:18px;margin:0;font-weight:800;letter-spacing:-.2px}
+header h1 span{color:var(--green)}
+header .grow{flex:1}
+.btn{background:var(--panel2);border:0;border-radius:6px;padding:8px 14px;cursor:pointer;font-weight:600}
+.btn:hover{filter:brightness(1.15)}
+.btn.primary{background:var(--green);color:#fff;box-shadow:0 4px 0 #45753c;font-size:17px;padding:12px 26px}
+.btn.primary:active{transform:translateY(2px);box-shadow:0 2px 0 #45753c}
+main{max-width:1240px;margin:0 auto;padding:20px}
+/* setup */
+#setup .card{background:var(--panel);border-radius:10px;padding:22px;max-width:780px;margin:20px auto}
+#setup h2{margin:0 0 6px}
+#setup p.lead{color:var(--muted);margin:0 0 16px}
+textarea#pgn{width:100%;min-height:220px;background:#1f1d1b;border:1px solid #4a4744;border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;resize:vertical}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:14px 0}
+.opts label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.opts input[type=text],.opts select{background:#1f1d1b;border:1px solid #4a4744;border-radius:6px;padding:8px}
+.opts .chk{flex-direction:row;align-items:center;gap:8px;color:var(--txt)}
+.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#err{color:#ff7769;margin-top:10px}
+.foot{color:var(--muted);font-size:12px;margin-top:16px;line-height:1.5}
+/* review */
+#review{display:grid;grid-template-columns:minmax(300px,640px) minmax(300px,1fr);gap:20px;align-items:start}
+.boardwrap{display:flex;gap:8px}
+#evalbar{width:26px;border-radius:4px;position:relative;overflow:hidden;flex:none}
+#evalfill{position:absolute;bottom:0;left:0;right:0;transition:height .35s}
+#evaltxt{position:absolute;left:0;right:0;text-align:center;font-size:10px;font-weight:800}
+#evaltxt.bottom{bottom:4px;color:#403d39}#evaltxt.top{top:4px;color:#fff}
+#board{flex:1;aspect-ratio:1;border-radius:4px;overflow:hidden}
+#board svg{display:block;width:100%;height:100%}
+.navbar{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center}
+.navbar .btn{padding:8px 12px}
+.navbar .grow{flex:1}
+#counter{color:var(--muted);font-size:13px;min-width:48px;text-align:center}
+.toggles{display:flex;gap:14px;margin-top:8px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+.toggles label{display:flex;gap:6px;align-items:center;cursor:pointer}
+#players{background:var(--panel);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-weight:600}
+#players .vs{color:var(--muted);margin:0 6px;font-weight:400}#players .res{float:right;color:var(--muted)}
+#players .term{color:var(--muted);font-size:12px;font-weight:400;margin-top:2px}
+.side{display:flex;flex-direction:column;gap:12px}
+#coach{background:var(--panel);border-radius:10px;padding:16px;min-height:180px}
+.coach-head{display:flex;gap:12px;align-items:center}
+.coach-head .sub{color:var(--muted);font-size:12.5px;margin-top:3px}
+.avatar{width:42px;height:42px;border-radius:50%;background:var(--green);display:grid;place-items:center;font-size:24px;flex:none}
+.badge{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font-weight:800;color:#fff;font-size:18px;flex:none}
+.badge.sm{width:22px;height:22px;font-size:11px;display:inline-grid;vertical-align:middle;margin-right:6px}
+.tag{background:#4a4744;border-radius:4px;padding:1px 6px;font-size:11px;color:var(--muted);font-weight:600;margin-left:4px}
+p.say{line-height:1.55;margin:14px 0 8px;font-size:15.5px}
+p.tip{background:#3a3428;border-left:3px solid #f7c631;padding:8px 10px;border-radius:4px;font-size:14px;line-height:1.5;margin:8px 0}
+p.muted{color:var(--muted)}
+details{margin:6px 0;font-size:14px}summary{cursor:pointer;color:var(--blue)}
+.line{font-family:ui-monospace,Menlo,monospace;font-size:13px;background:#262421;padding:6px 8px;border-radius:4px;margin-top:4px}
+.maia{margin-top:12px;border-top:1px solid #45423f;padding-top:10px}
+.maia .mh{font-size:13px;color:var(--muted);font-weight:600;margin-bottom:6px}
+.bar{display:grid;grid-template-columns:120px 1fr 40px;gap:8px;align-items:center;font-size:13px;margin:3px 0}
+.bar .mv i{font-style:normal;font-size:10.5px;background:#4a4744;border-radius:3px;padding:0 4px;color:#ddd}.bar .mv i.b{background:#4d6b32}
+.track{background:#262421;height:10px;border-radius:5px;overflow:hidden}.track span{display:block;height:100%;border-radius:5px}
+.pc{text-align:right;color:var(--muted)}
+.lv{font-size:12.5px;color:var(--muted);margin-top:8px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.lv span b{color:var(--txt)}
+p.human{font-size:13.5px;line-height:1.5;margin:8px 0 0;color:#cfcac4}
+#graph{height:90px;border-radius:6px;overflow:hidden;cursor:pointer}
+#graph svg{width:100%;height:100%;display:block}
+#moves{background:var(--panel);border-radius:10px;padding:8px;max-height:260px;overflow:auto}
+#moves .row{display:grid;grid-template-columns:38px 1fr 1fr;align-items:center}
+#moves .no{color:var(--muted);font-size:13px;text-align:right;padding-right:8px}
+#moves button.mv{background:none;border:0;text-align:left;padding:4px 8px;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:6px;font-weight:600}
+#moves button.mv:hover{background:var(--panel2)}#moves button.mv.cur{background:#4a4744}
+#moves .dot{width:9px;height:9px;border-radius:50%;background:#555;flex:none}
+#summary{background:var(--panel);border-radius:10px;padding:10px 14px}
+#summary table{width:100%;border-collapse:collapse;font-size:14px}
+#summary th{text-align:center;color:var(--muted);font-weight:600;padding:4px;font-size:13px}
+#summary td{padding:4px;text-align:center}#summary td:first-child{text-align:left}
+#summary tr.acc td{font-size:20px;font-weight:800;padding:6px 4px}#summary tr.acc td:first-child{font-size:14px;font-weight:600}
+#summary tr.cl{cursor:pointer}#summary tr.cl:hover{background:var(--panel2)}
+.status{background:var(--panel);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--muted);display:grid;gap:4px}
+.status b{color:var(--txt);font-weight:600}
+.prog{height:4px;background:#262421;border-radius:2px;overflow:hidden;margin-top:2px}#sfbar{height:100%;width:0;background:var(--green);transition:width .3s}
+#pgnOut{width:100%;height:120px;background:#1f1d1b;border:1px solid #4a4744;border-radius:6px;color:var(--txt);font-size:12px}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+.btn.act{padding:7px 12px;font-size:13.5px}
+.btn.act.retry{background:#81b64c;color:#fff}
+p.seq{font-family:ui-monospace,Menlo,monospace;font-size:14px;line-height:1.9;margin:12px 0 4px}
+.lm{padding:2px 5px;border-radius:4px;cursor:pointer}.lm:hover{background:var(--panel2)}.lm.cur{background:#4a8fd6;color:#fff}.lm.played{text-decoration:underline wavy #fa412d}
+#board.play{cursor:pointer}
+p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
+#analyzing{grid-column:1/-1;display:flex;gap:14px;align-items:center;background:var(--panel);border-radius:10px;padding:12px 16px;border-left:4px solid var(--green)}
+#analyzing[hidden]{display:none}
+#analyzing .an-body{flex:1;min-width:0}
+#analyzing .an-top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+#an-detail{color:var(--muted);font-size:13.5px}
+.an-maia{color:var(--muted);font-size:12px;margin-top:5px}
+.prog.big{height:8px;border-radius:4px;margin-top:8px}
+#anbar{height:100%;width:0;background:var(--green);transition:width .4s;border-radius:4px}
+.spin{width:28px;height:28px;border-radius:50%;border:3px solid #4a4744;border-top-color:var(--green);animation:sp 0.9s linear infinite;flex:none}
+#analyzing.done .spin{animation:none;border-color:var(--green);background:var(--green)}
+#analyzing.error{border-left-color:#fa412d}#analyzing.error .spin{animation:none;border-color:#fa412d}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
+</style>
+</head>
+<body>
+<header><h1>♞ Coach de <span>Xadrez</span></h1><div class="grow"></div><button class="btn" id="newGame">Nova partida</button></header>
+<main>
+<section id="setup">
+  <div class="card">
+    <h2>Cola o PGN da partida</h2>
+    <p class="lead">No chess.com: na partida, Compartilhar → PGN → copiar. Funciona com Lichess também.</p>
+    <textarea id="pgn" placeholder="[Event &quot;Live Chess&quot;]&#10;...&#10;1. e4 e5 2. Nf3 ..."></textarea>
+    <div class="opts">
+      <label>Seu usuário (pra saber seu lado)<input type="text" id="user" placeholder="ex: matheus_anzzulin"></label>
+      <label>Revisar como<select id="side"><option value="auto">Automático</option><option value="w">Brancas</option><option value="b">Pretas</option></select></label>
+      <label>Profundidade<select id="depth"><option value="fast">Rápida (prof. 12)</option><option value="normal">Normal (prof. 16)</option><option value="deep">Profunda (prof. 20)</option></select></label>
+      <label>Nível do Maia<select id="maiaLevel"><option value="auto">Rating da partida</option><option>600</option><option>800</option><option>1000</option><option>1200</option><option>1400</option><option>1600</option><option>1800</option><option>2000</option><option>2200</option><option>2400</option><option>2600</option></select></label>
+      <label class="chk"><input type="checkbox" id="useMaia" checked> Usar Maia (lance humano)</label>
+    </div>
+    <div class="actions"><button class="btn primary" id="go">Revisar partida</button><button class="btn" id="sample">Usar exemplo</button></div>
+    <div id="err"></div>
+    <p class="foot">Tudo roda no seu navegador: <b>Stockfish 19</b> (força máxima, avalia e acha o melhor lance) e <b>Maia-3</b> (rede treinada em partidas humanas, mostra o que jogadores de cada nível jogariam). A classificação segue as faixas de pontos esperados do chess.com sobre a curva de chance de vitória publicada pelo Lichess, com uma trava extra: entregar 4+ pontos de material nunca conta como simples imprecisão. O Maia cobre ratings de 600 a 2600; abaixo disso usa 600. O modelo do Maia tem 45 MB e baixa na primeira vez. Peças: set Staunty de sadsnake1 (CC BY-NC-SA 4.0).</p>
+  </div>
+</section>
+<section id="review" hidden>
+  <div id="analyzing" hidden><div class="spin"></div><div class="an-body"><div class="an-top"><b id="an-title">Analisando a partida…</b><span id="an-detail"></span></div><div class="prog big"><div id="anbar"></div></div><div id="an-maia" class="an-maia"></div></div></div>
+  <div>
+    <div class="boardwrap"><div id="evalbar"><div id="evalfill"></div><div id="evaltxt">0.0</div></div><div id="board"></div></div>
+    <div class="navbar">
+      <button class="btn" id="first" title="Início">⏮</button><button class="btn" id="prev" title="Anterior (←)">◀</button><span id="counter"></span><button class="btn" id="next" title="Próximo (→)">▶</button><button class="btn" id="last" title="Fim">⏭</button>
+      <span class="grow"></span>
+      <button class="btn" id="prevErr" title="Erro anterior seu">◀ erro</button><button class="btn" id="nextErr" title="Próximo erro seu">erro ▶</button><button class="btn" id="flip" title="Virar tabuleiro">⇅</button>
+    </div>
+    <div class="toggles"><label><input type="checkbox" id="showBest" checked> seta do melhor lance</label><label><input type="checkbox" id="showNext"> seta do melhor lance agora</label></div>
+  </div>
+  <div class="side">
+    <div id="players"></div>
+    <div id="coach"></div>
+    <div id="graph" title="Clique pra pular pra esse ponto"></div>
+    <div id="moves"></div>
+    <div id="summary" hidden></div>
+    <div class="status">
+      <div><b>Stockfish:</b> <span id="st-sf">…</span><div class="prog"><div id="sfbar"></div></div></div>
+      <div><b>Maia:</b> <span id="st-maia">…</span></div>
+      <div id="maiaBox" hidden></div>
+      <div><button class="btn" id="copyPgn">Copiar PGN anotado</button></div>
+      <textarea id="pgnOut" hidden readonly></textarea>
+    </div>
+  </div>
+</section>
+</main>
+<script type="module">/*APP*/</script>
+</body>
+</html>

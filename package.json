@@ -1,0 +1,23 @@
+{
+  "name": "chess-coach",
+  "version": "0.1.0",
+  "description": "Review de partidas de xadrez lance a lance, estilo coach, rodando 100% no navegador (Stockfish 19 + Maia-3).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bash build.sh",
+    "serve": "python3 -m http.server 8765 -d dist",
+    "test": "bash build.sh && node test/review-node.mjs test/game.pgn 12",
+    "test:maia": "bash build.sh && node test/maia-node.mjs"
+  },
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "onnxruntime-web": "1.23",
+    "stockfish": "^19.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "onnxruntime-node": "1.23"
+  }
+}
