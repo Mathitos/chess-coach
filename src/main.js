@@ -247,7 +247,25 @@ function arrow(from, to, color, flip, w = 16) {
     `<polygon points="${bx - ux * 8},${by - uy * 8} ${hx + px * 26},${hy + py * 26} ${hx - px * 26},${hy - py * 26}" fill="${color}"/></g>`
 }
 function boardView() {
+  const v = boardViewBase()
+  if (S.drag && S.drag.started) v.hide = S.drag.from
+  return v
+}
+function boardViewBase() {
   const g = S.game, i = S.idx, M = S.mode
+  if (M && M.type === 'explore') {
+    const fen = M.fens[M.i]
+    const v = { fen, arrows: [], sel: M.sel, dots: [], marks: [] }
+    if (M.sel) v.dots = new Chess(fen).moves({ square: M.sel, verbose: true }).map((m) => m.to)
+    const mv = M.i > 0 ? M.moves[M.i - 1] : null
+    const c = M.i > 0 ? M.cls[M.i - 1] : null
+    if (mv) v.last = { from: mv.from, to: mv.to, color: c ? R.CLASSES[c].color : '#f5f682', op: 0.5 }
+    if (mv && c) v.badge = [mv.to, R.CLASSES[c]]
+    const an = M.an[fen]
+    if (an && an.lines?.[0]?.pv?.[0] && $('#showBest').checked) { const u = an.lines[0].pv[0]; v.arrows.push([u.slice(0, 2), u.slice(2, 4), '#81b64c', 14]) }
+    v.info = an ? R.evalInfo(fen, an) : null
+    return v
+  }
   if (M && M.type === 'line') {
     const mv = M.i > 0 ? M.moves[M.i - 1] : null
     const nxt = M.moves[M.i]
@@ -291,7 +309,7 @@ function renderBoard() {
     svg += `<circle cx="${x + 50}" cy="${y + 50}" r="46" fill="url(#chk)"/>`
   }
   for (const row of ch.board()) for (const p of row) {
-    if (!p) continue
+    if (!p || p.square === V.hide) continue
     const [x, y] = sqXY(p.square, flip)
     svg += `<image href="${PIECES[p.color + p.type.toUpperCase()]}" x="${x}" y="${y}" width="100" height="100"/>`
   }
@@ -311,10 +329,10 @@ function renderBoard() {
     const [x, y] = sqXY(sq, flip)
     svg += `<g transform="translate(${Math.min(x + 78, 772)},${Math.max(y + 2, 22)})"><circle r="22" fill="${C.color}" stroke="#fff" stroke-width="3"/><text y="8" text-anchor="middle" font-size="${C.sym.length > 1 ? 20 : 24}" font-weight="800" fill="#fff">${C.sym}</text></g>`
   }
-  $('#board').classList.toggle('play', !!(S.mode && S.mode.type === 'retry' && !S.mode.solved))
+  $('#board').classList.toggle('play', !(S.mode && S.mode.type === 'retry' && (S.mode.solved || S.mode.busy)))
   $('#board').innerHTML = `<svg viewBox="0 0 800 800"><defs><radialGradient id="chk"><stop offset="0" stop-color="#ff2b2b"/><stop offset="1" stop-color="#ff2b2b" stop-opacity="0"/></radialGradient></defs>${svg}</svg>`
   // eval bar
-  const info = S.infos[i]
+  const info = V.info !== undefined ? V.info : S.infos[i]
   const wp = info ? info.wpW : 50
   const pct = flip ? 100 - wp : wp
   $('#evalfill').style.height = `${pct}%`
@@ -426,24 +444,168 @@ async function tryMove(uci) {
   M.busy = false
   render()
 }
-function boardClick(e) {
-  const M = S.mode
-  if (!M || M.type !== 'retry' || M.solved || M.busy) return
-  const svg = $('#board svg'); if (!svg) return
+// ── Board interaction: drag & drop or click-click ─────────────────────────
+function squareAt(e) {
+  const svg = $('#board svg'); if (!svg) return null
   const rect = svg.getBoundingClientRect()
   const fx = Math.floor(((e.clientX - rect.left) / rect.width) * 8), fy = Math.floor(((e.clientY - rect.top) / rect.height) * 8)
-  if (fx < 0 || fx > 7 || fy < 0 || fy > 7) return
-  const sq = S.flip ? FILES[7 - fx] + (fy + 1) : FILES[fx] + (8 - fy)
-  const ch = new Chess(M.fen)
+  if (fx < 0 || fx > 7 || fy < 0 || fy > 7) return null
+  return S.flip ? FILES[7 - fx] + (fy + 1) : FILES[fx] + (8 - fy)
+}
+// Current interactive position (starts explore mode from wherever we are).
+function interactiveFen(create) {
+  const M = S.mode
+  if (M && M.type === 'retry') return M.solved || M.busy ? null : M.fen
+  if (M && M.type === 'explore') return M.fens[M.i]
+  if (!create) return null
+  if (M && M.type === 'line') { const fen = M.fens[M.i]; startExplore(fen, `${M.label} (lance ${M.i})`); return fen }
+  const fen = S.game.positions[S.idx]
+  const lbl = S.idx === 0 ? 'a posição inicial' : (() => { const p = S.game.plies[S.idx - 1]; return `${Math.floor((S.idx - 1) / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}` })()
+  startExplore(fen, lbl, S.idx)
+  return fen
+}
+function selOwner() { return S.mode && (S.mode.type === 'retry' || S.mode.type === 'explore') ? S.mode : null }
+function legalMove(fen, from, to) {
+  const mv = new Chess(fen).moves({ square: from, verbose: true }).find((m) => m.to === to)
+  return mv ? mv.from + mv.to + (mv.promotion ? 'q' : '') : null
+}
+function userMove(uci) {
+  const M = S.mode
+  if (M.type === 'retry') return tryMove(uci)
+  if (M.type === 'explore') return exploreMove(uci)
+}
+function onPointerDown(e) {
+  if (!S.game || e.button > 0) return
+  const sq = squareAt(e); if (!sq) return
+  let fen = interactiveFen(false)
+  const ch = new Chess(fen || (S.mode?.type === 'line' ? S.mode.fens[S.mode.i] : S.game.positions[S.idx]))
   const p = ch.get(sq)
-  if (M.sel) {
-    const mv = ch.moves({ square: M.sel, verbose: true }).find((m) => m.to === sq)
-    if (mv) return tryMove(mv.from + mv.to + (mv.promotion ? 'q' : ''))
+  const own = p && p.color === ch.turn()
+  const owner = selOwner()
+  // click-click: second click on a target square
+  if (owner && owner.sel && !own) {
+    const uci = legalMove(fen, owner.sel, sq)
+    owner.sel = null
+    if (uci) return userMove(uci)
+    return render()
   }
-  M.sel = p && p.color === ch.turn() ? (M.sel === sq ? null : sq) : null
+  if (!own) return
+  if (!fen) { fen = interactiveFen(true); if (!fen) return }
+  const rect = $('#board').getBoundingClientRect()
+  S.drag = { from: sq, x0: e.clientX, y0: e.clientY, started: false, size: rect.width / 8, piece: p.color + p.type.toUpperCase() }
+  try { $('#board').setPointerCapture(e.pointerId) } catch {}
+  e.preventDefault()
+}
+function onPointerMove(e) {
+  const d = S.drag; if (!d) return
+  if (!d.started && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 6) return
+  if (!d.started) {
+    d.started = true
+    const ghost = document.createElement('img')
+    ghost.id = 'ghost'; ghost.src = PIECES[d.piece]
+    ghost.style.width = ghost.style.height = d.size + 'px'
+    document.body.appendChild(ghost)
+    const owner = selOwner(); if (owner) owner.sel = d.from
+    render()
+  }
+  const g = $('#ghost'); if (g) { g.style.left = e.clientX - d.size / 2 + 'px'; g.style.top = e.clientY - d.size / 2 + 'px' }
+}
+function onPointerUp(e) {
+  const d = S.drag; if (!d) return
+  S.drag = null
+  $('#ghost')?.remove()
+  const owner = selOwner()
+  const sq = squareAt(e)
+  const fen = interactiveFen(false)
+  if (d.started) {
+    if (owner) owner.sel = null
+    const uci = sq && sq !== d.from && fen ? legalMove(fen, d.from, sq) : null
+    if (uci) return userMove(uci)
+    return render()
+  }
+  // plain click on own piece: toggle selection
+  if (owner) owner.sel = owner.sel === d.from ? null : d.from
   render()
 }
+
+// ── Explore mode: free analysis from any position ──────────────────────────
+function startExplore(fen, label, gameIdx) {
+  stopTimer()
+  const an = {}
+  if (gameIdx !== undefined && S.sf[gameIdx]) an[fen] = S.sf[gameIdx]
+  S.mode = { type: 'explore', baseLabel: label, fens: [fen], moves: [], cls: [], fb: [], i: 0, an, sel: null }
+  analyseExplore(fen)
+}
+async function analyseExplore(fen) {
+  const M = S.mode
+  if (!M || M.type !== 'explore' || M.an[fen]) return
+  const ch = new Chess(fen)
+  M.an[fen] = ch.isGameOver() ? { lines: [] } : await getStockfish().u.analyse(fen, { depth: 14, movetime: 1000 })
+  if (S.mode !== M) return
+  classifyExplore(M)
+  render()
+}
+function classifyExplore(M) {
+  for (let j = 0; j < M.moves.length; j++) {
+    if (M.cls[j]) continue
+    const before = M.an[M.fens[j]], after = M.an[M.fens[j + 1]]
+    if (!before || !after) continue
+    const m = M.moves[j], c = m.color
+    const ib = R.evalInfo(M.fens[j], before), ia = R.evalInfo(M.fens[j + 1], after)
+    if (!ib || !ia) continue
+    const wb = c === 'w' ? ib.wpW : 100 - ib.wpW, wa = c === 'w' ? ia.wpW : 100 - ia.wpW
+    const uci = m.from + m.to + (m.promotion || '')
+    const best = before.lines?.[0]?.pv?.[0]
+    const loss = uci === best ? 0 : Math.max(0, wb - wa) / 100
+    M.cls[j] = uci === best || loss < 0.001 ? 'best' : loss < 0.02 ? 'excellent' : loss < 0.05 ? 'good' : loss < 0.10 ? 'inaccuracy' : loss < 0.20 ? 'mistake' : 'blunder'
+    if (['inaccuracy', 'mistake', 'blunder'].includes(M.cls[j])) {
+      const fb = R.attemptFeedback(M.fens[j], uci, after, c, wb)
+      const bm = best ? R.playLine(M.fens[j], [best]).moves[0]?.san : null
+      M.fb[j] = (fb ? fb.text.replace(/ não é o melhor/, ' não é o melhor lance') : '') + (bm ? ` Melhor era ${bm}.` : '')
+    }
+  }
+}
+function exploreMove(uci) {
+  const M = S.mode
+  const ch = new Chess(M.fens[M.i])
+  let mv
+  try { mv = ch.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { return render() }
+  M.fens.length = M.i + 1; M.moves.length = M.i; M.cls.length = M.i; M.fb.length = M.i
+  M.fens.push(ch.fen()); M.moves.push(mv); M.i++
+  M.sel = null
+  render()
+  analyseExplore(M.fens[M.i - 1]).then(() => analyseExplore(M.fens[M.i]))
+}
+function exploreStep(d) { const M = S.mode; M.i = Math.max(0, Math.min(M.moves.length, M.i + d)); M.sel = null; render(); analyseExplore(M.fens[M.i]) }
+function renderExplorePanel(box) {
+  const M = S.mode, fen = M.fens[M.i]
+  const an = M.an[fen], info = an ? R.evalInfo(fen, an) : null
+  const turn = new Chess(fen).turn() === 'w' ? 'Brancas' : 'Pretas'
+  let seq = ''
+  M.moves.forEach((m, j) => {
+    const c = M.cls[j], C = c ? R.CLASSES[c] : null
+    seq += `<span class="lm${j + 1 === M.i ? ' cur' : ''}" data-j="${j + 1}">${C ? `<i class="dot" style="background:${C.color}"></i>` : ''}${esc(m.san)}</span> `
+  })
+  let html = `<div class="coach-head"><div class="avatar">🔍</div><div><b>Explorando variante</b><div class="sub">a partir de ${esc(M.baseLabel)} · vez das ${turn} · avaliação ${info ? esc(info.text) : '…'}</div></div></div>`
+  if (!M.moves.length) html += `<p class="say">Arrasta as peças (ou clica na peça e depois na casa) pra testar lances. O Stockfish avalia cada um.</p>`
+  else html += `<p class="seq">${seq}</p>`
+  const j = M.i - 1
+  if (j >= 0) {
+    const c = M.cls[j]
+    if (!c) html += `<p class="say muted">Avaliando ${esc(M.moves[j].san)}…</p>`
+    else if (M.fb[j]) html += `<p class="say badmsg">${esc(M.fb[j])}</p>`
+    else html += `<p class="say good">${esc(M.moves[j].san)}: ${R.CLASSES[c].label.toLowerCase()}.</p>`
+  }
+  const best = an?.lines?.[0]?.pv?.length ? R.playLine(fen, an.lines[0].pv, 4).moves.map((m) => m.san) : []
+  if (best.length) html += `<p class="human">Melhor aqui: <b>${esc(best[0])}</b> <span class="muted">(${esc(best.join(' '))})</span></p>`
+  html += `<div class="acts"><button class="btn act" data-act="xprev">◀</button><button class="btn act" data-act="xnext">▶</button>`
+  if (best.length) html += `<button class="btn act" data-act="xbest">Jogar o melhor</button>`
+  html += `<button class="btn act" data-act="exit">✕ Voltar pra partida</button></div>`
+  box.innerHTML = html
+}
+
 function renderModePanel(box) {
+  if (S.mode.type === 'explore') return renderExplorePanel(box)
   const M = S.mode, g = S.game
   const p = g.plies[M.k]
   const moveLbl = `${Math.floor(M.k / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}`
@@ -461,7 +623,7 @@ function renderModePanel(box) {
     return
   }
   const side = p.color === 'w' ? 'Brancas' : 'Pretas'
-  let html = `<div class="coach-head"><div class="avatar">↻</div><div><b>Tentar de novo: ${esc(moveLbl)}</b><div class="sub">Você joga de ${side}. Clica na peça e depois na casa.</div></div></div>`
+  let html = `<div class="coach-head"><div class="avatar">↻</div><div><b>Tentar de novo: ${esc(moveLbl)}</b><div class="sub">Você joga de ${side}. Arrasta a peça (ou clica nela e depois na casa).</div></div></div>`
   if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${esc(M.msg)}</p>`
   else html += `<p class="say">Na partida você jogou ${esc(p.san)}. Acha um lance melhor?</p>`
   html += `<div class="acts">`
@@ -475,6 +637,14 @@ function renderModePanel(box) {
 function onCoachAction(e) {
   const b = e.target.closest('[data-act]')
   const lm = e.target.closest('.lm')
+  if (lm && S.mode?.type === 'explore') { S.mode.i = +lm.dataset.j; render(); analyseExplore(S.mode.fens[S.mode.i]); return }
+  if (b && S.mode?.type === 'explore') {
+    const act = b.dataset.act
+    if (act === 'xprev') return exploreStep(-1)
+    if (act === 'xnext') return exploreStep(1)
+    if (act === 'xbest') { const u = S.mode.an[S.mode.fens[S.mode.i]]?.lines?.[0]?.pv?.[0]; if (u) exploreMove(u); return }
+    if (act === 'exit') return exitMode()
+  }
   if (lm && S.mode?.type === 'line') { stopTimer(); S.mode.playing = false; S.mode.i = +lm.dataset.j; return render() }
   if (!b) return
   const k = S.mode ? S.mode.k : S.idx - 1
@@ -620,7 +790,11 @@ function init() {
   $('#showNext').onchange = render
   $('#graph').onclick = graphClick
   $('#coach').onclick = onCoachAction
-  $('#board').onclick = boardClick
+  const bd = $('#board')
+  bd.addEventListener('pointerdown', onPointerDown)
+  bd.addEventListener('pointermove', onPointerMove)
+  bd.addEventListener('pointerup', onPointerUp)
+  bd.addEventListener('pointercancel', () => { S.drag = null; $('#ghost')?.remove(); render() })
   $('#summary').onclick = (e) => {
     const tr = e.target.closest('tr.cl'); if (!tr) return
     const c = tr.dataset.cls
@@ -633,6 +807,7 @@ function init() {
   }
   document.addEventListener('keydown', (e) => {
     if (document.body.dataset.view !== 'review' || e.target.matches('textarea,input,select')) return
+    if (S.mode?.type === 'explore' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { exploreStep(e.key === 'ArrowLeft' ? -1 : 1); e.preventDefault(); return }
     if (S.mode?.type === 'line' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { lineStep(e.key === 'ArrowLeft' ? -1 : 1); e.preventDefault(); return }
     if (e.key === 'Escape' && S.mode) { exitMode(); return }
     if (e.key === 'ArrowLeft') { go(S.idx - 1); e.preventDefault() }
