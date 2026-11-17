@@ -181,6 +181,7 @@ describe('app', () => {
   test('salvar desafios e treinar (local, sem login)', { timeout: 300000 }, async () => {
     const { page, errors } = await newPage()
     assert.equal(await page.locator('#acct button').count(), 0) // sem client id do Google: sem botão de login
+    assert.equal(await page.isVisible('#loginModal'), false) // nem popup de login
     assert.match(await page.textContent('#chal'), /Nenhum desafio ainda/)
     assert.equal(await page.isVisible('#trainBtn'), false) // na tela inicial o treino fica no card
     await page.fill('#pgn', read('game2.pgn'))
@@ -316,6 +317,13 @@ describe('Google Drive (mock do Google)', () => {
       })
       await page.goto(base)
       await page.evaluate(() => localStorage.clear()); await page.reload()
+      // primeira visita: popup oferecendo login; "Agora não" fecha e não volta
+      await page.waitForSelector('#loginModal:not([hidden])')
+      assert.match(await page.textContent('#loginModal'), /Entrar com o Google\?/)
+      await page.click('#loginModal [data-lm=no]')
+      assert.equal(await page.isVisible('#loginModal'), false)
+      await page.reload()
+      assert.equal(await page.isVisible('#loginModal'), false)
       await page.uncheck('#useMaia'); await page.selectOption('#depth', 'fast')
       // tela inicial deslogada: desafios pedem login
       assert.equal(await page.locator('#acct [data-acct=in]').count(), 1)

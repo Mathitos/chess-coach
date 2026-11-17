@@ -215,12 +215,23 @@ header{position:relative}
 .glist li:hover{background:var(--panel2)}
 .gres{font-weight:800;width:18px;text-align:center}.gres.w{color:#9cc76a}.gres.l{color:#ff8a7a}.gres.d{color:var(--muted)}
 .src{background:#262421;border-radius:8px;padding:10px 12px;font-size:13.5px;margin:10px 0 0;line-height:1.5}
+.modal{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:16px}
+.modal[hidden]{display:none}
+.mbox{background:var(--panel);border-radius:14px;padding:26px;max-width:440px;width:100%;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.mbox h2{margin:0;font-size:21px}
+.mact{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px}
 @media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
 </style>
 </head>
 <body>
 <header><h1 id="home" title="Início">♞ Coach de <span>Xadrez</span></h1><div class="grow"></div><button class="btn" id="trainBtn">🎯 Treinar</button><button class="btn" id="newGame">⌂ Início</button><span id="acct"></span><button class="btn icon" id="batchBadge" hidden></button><button class="btn icon" id="gear" title="Minhas partidas: buscar e analisar partidas recentes" aria-haspopup="dialog">⚙</button></header>
 <div id="settings" role="dialog" aria-label="Minhas partidas" hidden></div>
+<div id="loginModal" class="modal" hidden><div class="mbox" role="dialog" aria-modal="true" aria-labelledby="lmTitle">
+  <div class="ch-head"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#81b64c" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="#81b64c"/></svg><h2 id="lmTitle">Entrar com o Google?</h2></div>
+  <p class="ch-p">Com login, seus erros e as chances que você deixa passar viram <b>desafios</b> pra treinar, salvos no seu Google Drive (numa pasta só do app) e sincronizados entre aparelhos.</p>
+  <p class="ch-note">Dá pra revisar partidas sem login. Você pode entrar depois pelo botão no canto de cima.</p>
+  <div class="mact"><button class="btn" data-lm="no">Agora não</button><span id="lmLogin"></span></div>
+</div></div>
 <main>
 <section id="setup">
   <div class="card" id="revCard">

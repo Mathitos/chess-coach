@@ -1672,6 +1672,20 @@ function init() {
   // Sessão: conta fica lembrada até clicar em Sair. Se o token venceu, renova
   // sozinho no primeiro clique (o Google exige um clique pra abrir o popup).
   if (S.account && G.available()) { if (G.signedIn()) { syncDrive(); scheduleRenew() } else armRenew() }
+  // Primeira visita sem login: oferece entrar com o Google (uma vez só)
+  if (G.available() && !S.account && !store.get('loginPrompted', false)) {
+    const m = $('#loginModal')
+    $('#lmLogin').innerHTML = loginBtn()
+    const close = () => { m.hidden = true; store.set('loginPrompted', true); document.removeEventListener('keydown', onKey) }
+    const onKey = (e) => { if (e.key === 'Escape') close() }
+    m.onclick = (e) => {
+      if (e.target === m || e.target.closest('[data-lm=no]')) return close()
+      if (e.target.closest('[data-acct=in]')) { close(); googleLogin() }
+    }
+    document.addEventListener('keydown', onKey)
+    m.hidden = false
+    m.querySelector('[data-acct=in]').focus()
+  }
   document.body.dataset.view = 'setup'
   renderAcct()
   $('#first').onclick = () => go(0)
