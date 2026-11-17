@@ -49,6 +49,7 @@ async function sq(page, square, flip = false) {
 async function drag(page, a, b, flip = false) {
   await page.mouse.move(...(await sq(page, a, flip))); await page.mouse.down()
   await page.mouse.move(...(await sq(page, b, flip)), { steps: 8 }); await page.mouse.up()
+  await page.waitForTimeout(250)
 }
 
 describe('app', () => {
@@ -83,14 +84,44 @@ describe('app', () => {
     assert.deepEqual(errors, [])
   })
 
-  test('explorar variante a partir da partida', { timeout: 300000 }, async () => {
+  test('variante: arrastar cria fork, ◀ volta pra partida e a variante fica salva', { timeout: 300000 }, async () => {
+    const { page, errors } = await newPage()
+    await page.fill('#pgn', read('game2.pgn'))
+    await page.click('#go'); await waitDone(page)
+    await page.evaluate(() => document.querySelector('#mv32').click()) // depois de 16...Qc6, vez das brancas
+    await drag(page, 'g5', 'f7') // 17.Nf7 (igual à partida) só avança na linha principal
+    assert.equal(await page.textContent('#counter'), '33/34')
+    await page.click('#prev')
+    await drag(page, 'd3', 'f5') // 17.Bxf5+ é um lance diferente: abre variante
+    await page.waitForFunction(() => /Variante/.test(document.querySelector('#coach').textContent), null, { timeout: 60000 })
+    await drag(page, 'c8', 'b8') // 17...Kb8 continua a variante
+    assert.equal(await page.locator('.varrow .vmv').count(), 2)
+    await page.click('#prev'); await page.click('#prev') // volta passando do ponto do fork
+    assert.equal(await page.textContent('#counter'), '32/34') // linha principal
+    assert.equal(await page.locator('.varrow .vmv').count(), 2) // variante continua no histórico
+    await page.click('.varrow .vmv[data-j="2"]') // volta pra dentro da variante pelo histórico
+    assert.equal(await page.textContent('#counter'), 'variante')
+    await page.click('#prev')
+    assert.match(await page.textContent('.vmv.cur'), /Bxf5/)
+    await page.click('#next')
+    assert.match(await page.textContent('.vmv.cur'), /Kb8/)
+    // lance diferente no meio da variante cria outra variante sem apagar a primeira
+    await page.click('#prev')
+    await drag(page, 'd8', 'd7') // 17...Rd7 (bloqueia o xeque)
+    assert.equal(await page.locator('.varrow').count(), 2)
+    await page.click('.varrow .vdel >> nth=0')
+    assert.equal(await page.locator('.varrow').count(), 1)
+    assert.deepEqual(errors, [])
+  })
+
+  test('mexer na linha principal com o mesmo lance da partida só avança', { timeout: 300000 }, async () => {
     const { page, errors } = await newPage()
     await page.fill('#pgn', read('game2.pgn'))
     await page.click('#go'); await waitDone(page)
     await page.evaluate(() => document.querySelector('#mv32').click())
     await drag(page, 'g5', 'f7')
-    await page.waitForFunction(() => /permite mate em 1/.test(document.querySelector('#coach').textContent), null, { timeout: 60000 })
-    assert.match(await page.textContent('#coach'), /Explorando variante/)
+    await page.waitForFunction(() => /capivarada/.test(document.querySelector('#coach').textContent), null, { timeout: 60000 })
+    assert.equal(await page.locator('.varrow').count(), 0)
     assert.deepEqual(errors, [])
   })
 
@@ -115,6 +146,11 @@ describe('app', () => {
     await page.fill('#pgn', 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3')
     await page.click('#go')
     await page.waitForFunction(() => /Melhor aqui/.test(document.querySelector('#coach').textContent), null, { timeout: 60000 })
+    await drag(page, 'f1', 'b5')
+    await page.waitForFunction(() => /Variante/.test(document.querySelector('#coach').textContent), null, { timeout: 60000 })
+    await page.click('#prev')
+    assert.match(await page.textContent('#coach'), /Posição colada/)
+    assert.equal(await page.locator('.varrow').count(), 1)
     assert.deepEqual(errors, [])
   })
 })

@@ -461,12 +461,52 @@ export function coachText(game, sf, threats, cls, k, maia, opts = {}) {
     else if (['best', 'excellent', 'great', 'brilliant'].includes(r.cls) && pPlayed < 0.08) human = `Lance pouco óbvio: só ${pct(pPlayed)} dos jogadores ~${lvl} achariam.`
     else if (!bad && r.cls !== 'forced' && pPlayed >= 0.5) human = `Lance natural: ${pct(pPlayed)} dos jogadores ~${lvl} jogariam igual.`
   }
-  const say = opts.third ? thirdPerson(parts.join(' ')) : parts.join(' ')
-  return { text: say, tip: tip[0] || null, human, bestSan: best.san, bestLine: bestLine ? sanLine(fenB, bestLine.pv, 6) : [], replySan: reply ? sanLine(fenA, reply.pv, 6) : [] }
+  const out = { text: parts.join(' '), tip: tip[0] || null, human, bestSan: best.san, bestLine: bestLine ? sanLine(fenB, bestLine.pv, 6) : [], replySan: reply ? sanLine(fenA, reply.pv, 6) : [] }
+  if (opts.third) return opponentView(game, sf, threats, cls, k, out, parts)
+  return out
+}
+
+// Opponent's move, told from the user's point of view: their mistake is your chance.
+const OPP_HEAD = {
+  brilliant: 'Lance brilhante do adversário.', great: 'Ótimo lance do adversário.', best: 'Bom lance do adversário.',
+  excellent: 'Bom lance do adversário.', good: 'Lance ok do adversário.', forced: 'Lance forçado do adversário.',
+  inaccuracy: 'O adversário foi impreciso.', mistake: 'O adversário errou!', miss: 'O adversário deixou passar uma chance!', blunder: 'O adversário cometeu uma capivarada!',
+}
+function opponentView(game, sf, threats, cls, k, out, parts) {
+  const r = cls[k], p = game.plies[k]
+  const me = opp(p.color)
+  const fenA = game.positions[k + 1]
+  const bad = ['inaccuracy', 'mistake', 'blunder', 'miss'].includes(r.cls)
+  if (new Chess(fenA).isCheckmate()) return { ...out, text: 'Xeque-mate do adversário.', tip: null, human: null, punishSan: [] }
+  const say = [OPP_HEAD[r.cls]]
+  const mine = game.plies[k + 1]
+  const myR = cls[k + 1]
+  const myLine = sf[k + 1] && sf[k + 1].lines && sf[k + 1].lines[0]
+  if (bad) {
+    // why it was bad (reuse the analysis, minus the opening headline and "Melhor era…")
+    const why = parts.slice(1).filter((x) => !/^Melhor era/.test(x) && !/^O adversário tinha acabado/.test(x) && !/^Com o lance jogado/.test(x))
+    if (why.length) say.push(thirdPerson(why.join(' ')))
+    if (myLine && myLine.pv.length) {
+      const m = lineMotif(fenA, myLine, me)
+      const ex = explainBest(fenA, myLine, me, m, threats && threats[k + 1])
+      say.push(`Sua chance de punir: ${m.san}${ex ? ' (' + ex + ')' : ''}.`)
+      if (mine && myR) {
+        if (mine.uci === myR.bestUci) say.push('E você achou! ✓')
+        else say.push(`Na partida você jogou ${mine.san}${['mistake', 'blunder', 'miss'].includes(myR.cls) ? ' e deixou passar' : ''}.`)
+      }
+    }
+  } else {
+    const t = threats && threats[k + 1]
+    if (t && t.real) say.push(`Agora ele ameaça ${t.san}${t.why ? ' (' + t.why + ')' : ''}: fica de olho.`)
+    const own = describeIdea(game.positions[k], [p.uci], p.color, threats && threats[k])
+    if (own.length && say.length === 1) say.push(cap(joinPt(own)) + '.')
+  }
+  const myBest = myLine && myLine.pv.length ? sanLine(fenA, myLine.pv, 6) : []
+  return { ...out, text: say.join(' '), tip: null, human: null, punishSan: bad ? myBest : [] }
 }
 const cap = (s) => s[0].toUpperCase() + s.slice(1)
 function thirdPerson(t) {
-  return t.replace(/ameaça do adversário/g, 'sua ameaça').replace(/Você/g, 'Ele').replace(/você/g, 'ele').replace(/Sua chance/g, 'A chance dele').replace(/sua chance/g, 'a chance dele')
+  return t.replace(/ameaça do adversário/g, 'sua ameaça').replace(/do seu rei/g, 'do rei dele').replace(/Seu rei/g, 'O rei dele').replace(/seu rei/g, 'o rei dele').replace(/onde seus peões/g, 'onde os peões dele').replace(/seus peões/g, 'os peões dele').replace(/Você/g, 'Ele').replace(/você/g, 'ele').replace(/Sua chance/g, 'A chance dele').replace(/sua chance/g, 'a chance dele')
     .replace(/Deixou escapar!/g, 'Ele deixou escapar!').replace(/Puniu o erro do adversário/g, 'Puniu o seu erro')
     .replace(/O adversário tinha acabado de errar/g, 'Você tinha acabado de errar').replace(/Isso aí, lance do engine\./g, 'Lance do engine.')
     .replace(/^Perfeito, era o melhor\./, 'Era o melhor.').replace(/ te dando /g, ' dando a ele ')

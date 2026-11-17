@@ -198,6 +198,7 @@ async function start() {
   const lvl = (elo) => (lvlSel === 'auto' ? Math.max(600, Math.min(2600, Math.round((+elo || 1000) / 100) * 100)) : +lvlSel)
   Object.assign(S, { game, sf: new Array(game.positions.length), threats: new Array(game.plies.length), infos: [], cls: [], maia: [], maiaRaw: {}, idx: 0, side, flip: side === 'b', maiaElo: { w: lvl(h.WhiteElo), b: lvl(h.BlackElo) } })
   const runId = ++S.runId
+  S.vars = []; S.anCache = {}; S.sel = null; S.mode = null
   resetStockfish()
   $('#an-maia').textContent = ''
   show('review')
@@ -210,6 +211,7 @@ async function start() {
 }
 
 function startPosition(fen) {
+  S.vars = []; S.anCache = {}; S.sel = null; S.mode = null
   const game = { headers: {}, plies: [], positions: [fen] }
   Object.assign(S, { game, sf: [], threats: [], infos: [], cls: [], maia: [], maiaRaw: {}, idx: 0, side: fen.split(' ')[1], flip: fen.split(' ')[1] === 'b', clock: null })
   S.runId++
@@ -220,8 +222,8 @@ function startPosition(fen) {
   $('#summary').hidden = true
   status('sf', 'modo explorar'); status('maia', 'desligado')
   buildMoveList()
-  startExplore(fen, 'a posição colada')
   render()
+  getStockfish().u.analyse(fen, { depth: 16, movetime: 2000 }).then((an) => { S.sf[0] = an; S.infos[0] = R.evalInfo(fen, an); render() })
 }
 
 async function runStockfish(runId) {
@@ -361,7 +363,7 @@ function boardViewBase() {
     const c = M.i > 0 ? M.cls[M.i - 1] : null
     if (mv) v.last = { from: mv.from, to: mv.to, color: c ? R.CLASSES[c].color : '#f5f682', op: 0.5 }
     if (mv && c) v.badge = [mv.to, R.CLASSES[c]]
-    const an = M.an[fen]
+    const an = anFor(fen)
     if (an && an.lines?.[0]?.pv?.[0] && $('#showBest').checked) { const u = an.lines[0].pv[0]; v.arrows.push([u.slice(0, 2), u.slice(2, 4), '#81b64c', 14]) }
     v.info = an ? R.evalInfo(fen, an) : null
     return v
@@ -381,7 +383,8 @@ function boardViewBase() {
   }
   const last = i > 0 ? g.plies[i - 1] : null
   const r = i > 0 ? S.cls[i - 1] : null
-  const v = { fen: g.positions[i], arrows: [], badge: null }
+  const v = { fen: g.positions[i], arrows: [], badge: null, sel: S.sel, dots: [] }
+  if (S.sel) v.dots = new Chess(g.positions[i]).moves({ square: S.sel, verbose: true }).map((m) => m.to)
   if (last) v.last = { from: last.from, to: last.to, color: r ? R.CLASSES[r.cls].color : '#f5f682', op: r ? 0.45 : 0.5 }
   if (last && r && !['best', 'forced', 'brilliant', 'great'].includes(r.cls) && r.bestUci && $('#showBest').checked) v.arrows.push([r.bestUci.slice(0, 2), r.bestUci.slice(2, 4), '#81b64c', 16])
   if ($('#showNext').checked && S.sf[i]?.lines?.[0]?.pv?.[0]) { const u = S.sf[i].lines[0].pv[0]; v.arrows.push([u.slice(0, 2), u.slice(2, 4), '#4a8fd6', 12]) }
@@ -465,6 +468,12 @@ function renderCoach() {
   const g = S.game, i = S.idx
   const box = $('#coach')
   if (S.mode) return renderModePanel(box)
+  if (i === 0 && !g.plies.length) {
+    const an = S.sf[0], fen = g.positions[0]
+    const best = an?.lines?.[0]?.pv?.length ? R.playLine(fen, an.lines[0].pv, 4).moves.map((x) => x.san) : []
+    box.innerHTML = `<div class="coach-head"><div class="avatar">🔍</div><div><b>Posição colada</b><div class="sub">vez das ${new Chess(fen).turn() === 'w' ? 'Brancas' : 'Pretas'} · avaliação ${S.infos[0] ? esc(S.infos[0].text) : '…'}</div></div></div><p class="say">Arrasta uma peça pra testar lances. Cada variante fica salva no histórico.</p>${best.length ? `<p class="human">Melhor aqui: <b>${esc(best[0])}</b> <span class="muted">(${esc(best.join(' '))})</span></p>` : ''}`
+    return
+  }
   if (i === 0) {
     box.innerHTML = `<div class="coach-head"><div class="avatar">♞</div><div><b>Bora revisar!</b><div class="sub">Use ← → ou os botões. Revisando como ${S.side === 'w' ? 'Brancas' : 'Pretas'}.</div></div></div>${S.cls.length ? '' : '<p class="muted">Analisando com o Stockfish… dá pra ir navegando enquanto isso.</p>'}`
     return
@@ -484,6 +493,7 @@ function renderCoach() {
   const bad = ['inaccuracy', 'mistake', 'blunder', 'miss'].includes(r.cls)
   html += `<div class="acts">`
   if (mine && bad) html += `<button class="btn act retry" data-act="retry">↻ Tentar de novo</button>`
+  if (!mine && bad && g.plies[k + 1] && S.cls[k + 1]) html += `<button class="btn act retry" data-act="punishTry">🎯 Achar a punição</button>`
   if (t.bestLine.length && r.cls !== 'forced') html += `<button class="btn act" data-act="best">▶ ${r.cls === 'best' || p.uci === r.bestUci ? 'Ver continuação' : 'Ver melhor lance (' + esc(t.bestSan) + ')'}</button>`
   if (t.replySan.length && bad) html += `<button class="btn act" data-act="punish">▶ ${r.cls === 'miss' ? 'Ver o que acontece depois' : mine ? 'Ver como o adversário pune' : 'Ver como punir'}</button>`
   html += `</div>`
@@ -572,45 +582,51 @@ function squareAt(e) {
   if (fx < 0 || fx > 7 || fy < 0 || fy > 7) return null
   return S.flip ? FILES[7 - fx] + (fy + 1) : FILES[fx] + (8 - fy)
 }
-// Current interactive position (starts explore mode from wherever we are).
-function interactiveFen(create) {
+// Position the board is showing right now (any mode).
+function shownFen() {
+  const M = S.mode
+  if (M && M.type === 'retry') return M.fen
+  if (M && (M.type === 'explore' || M.type === 'line')) return M.fens[M.i]
+  return S.game.positions[S.idx]
+}
+// Position the user can move in (null = not interactive right now).
+function interactiveFen() {
   const M = S.mode
   if (M && M.type === 'retry') return M.solved || M.busy ? null : M.fen
-  if (M && M.type === 'explore') return M.fens[M.i]
-  if (!create) return null
-  if (M && M.type === 'line') { const fen = M.fens[M.i]; startExplore(fen, `${M.label} (lance ${M.i})`); return fen }
-  const fen = S.game.positions[S.idx]
-  const lbl = S.idx === 0 ? 'a posição inicial' : (() => { const p = S.game.plies[S.idx - 1]; return `${Math.floor((S.idx - 1) / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}` })()
-  startExplore(fen, lbl, S.idx)
-  return fen
+  return shownFen()
 }
-function selOwner() { return S.mode && (S.mode.type === 'retry' || S.mode.type === 'explore') ? S.mode : null }
+function selOwner() { return S.mode && S.mode.type !== 'line' ? S.mode : S }
 function legalMove(fen, from, to) {
   const mv = new Chess(fen).moves({ square: from, verbose: true }).find((m) => m.to === to)
   return mv ? mv.from + mv.to + (mv.promotion ? 'q' : '') : null
 }
 function userMove(uci) {
   const M = S.mode
-  if (M.type === 'retry') return tryMove(uci)
-  if (M.type === 'explore') return exploreMove(uci)
+  S.sel = null
+  if (M && M.type === 'retry') return tryMove(uci)
+  if (M && M.type === 'explore') return exploreMove(uci)
+  if (M && M.type === 'line') { stopTimer(); return branchFrom(M.k, M.moves.slice(0, M.i), uci) }
+  // main line: same move as the game just advances; otherwise branch
+  const p = S.game.plies[S.idx]
+  if (p && p.uci.slice(0, 4) === uci.slice(0, 4)) return go(S.idx + 1)
+  return branchFrom(S.idx, [], uci)
 }
 function onPointerDown(e) {
   if (!S.game || e.button > 0) return
   const sq = squareAt(e); if (!sq) return
-  let fen = interactiveFen(false)
-  const ch = new Chess(fen || (S.mode?.type === 'line' ? S.mode.fens[S.mode.i] : S.game.positions[S.idx]))
+  const fen = interactiveFen(); if (!fen) return
+  const ch = new Chess(fen)
   const p = ch.get(sq)
   const own = p && p.color === ch.turn()
   const owner = selOwner()
   // click-click: second click on a target square
-  if (owner && owner.sel && !own) {
+  if (owner.sel && !own) {
     const uci = legalMove(fen, owner.sel, sq)
     owner.sel = null
     if (uci) return userMove(uci)
     return render()
   }
   if (!own) return
-  if (!fen) { fen = interactiveFen(true); if (!fen) return }
   const rect = $('#board').getBoundingClientRect()
   S.drag = { from: sq, x0: e.clientX, y0: e.clientY, started: false, size: rect.width / 8, piece: p.color + p.type.toUpperCase() }
   try { $('#board').setPointerCapture(e.pointerId) } catch {}
@@ -625,7 +641,7 @@ function onPointerMove(e) {
     ghost.id = 'ghost'; ghost.src = PIECES[d.piece]
     ghost.style.width = ghost.style.height = d.size + 'px'
     document.body.appendChild(ghost)
-    const owner = selOwner(); if (owner) owner.sel = d.from
+    selOwner().sel = d.from
     render()
   }
   const g = $('#ghost'); if (g) { g.style.left = e.clientX - d.size / 2 + 'px'; g.style.top = e.clientY - d.size / 2 + 'px' }
@@ -636,91 +652,153 @@ function onPointerUp(e) {
   $('#ghost')?.remove()
   const owner = selOwner()
   const sq = squareAt(e)
-  const fen = interactiveFen(false)
+  const fen = interactiveFen()
   if (d.started) {
-    if (owner) owner.sel = null
+    owner.sel = null
     const uci = sq && sq !== d.from && fen ? legalMove(fen, d.from, sq) : null
     if (uci) return userMove(uci)
     return render()
   }
-  // plain click on own piece: toggle selection
-  if (owner) owner.sel = owner.sel === d.from ? null : d.from
+  owner.sel = owner.sel === d.from ? null : d.from
   render()
 }
 
-// ── Explore mode: free analysis from any position ──────────────────────────
-function startExplore(fen, label, gameIdx) {
-  stopTimer()
-  const an = {}
-  if (gameIdx !== undefined && S.sf[gameIdx]) an[fen] = S.sf[gameIdx]
-  S.mode = { type: 'explore', baseLabel: label, fens: [fen], moves: [], cls: [], fb: [], i: 0, an, sel: null }
-  analyseExplore(fen)
+// ── Variations: forks of the game kept as a tree hanging off the main line ──
+// Each variation starts at main-line position `fromIdx` and holds its own moves.
+// Variation cursor i: 1..moves.length (i = 0 would be the main-line position itself).
+let varSeq = 0
+function anFor(fen) {
+  if (S.anCache[fen]) return S.anCache[fen]
+  const j = S.game.positions.indexOf(fen)
+  return j >= 0 && S.sf[j] ? S.sf[j] : null
 }
-async function analyseExplore(fen) {
-  const M = S.mode
-  if (!M || M.type !== 'explore' || M.an[fen]) return
-  const ch = new Chess(fen)
-  M.an[fen] = ch.isGameOver() ? { lines: [] } : await getStockfish().u.analyse(fen, { depth: 14, movetime: 1000 })
-  if (S.mode !== M) return
-  classifyExplore(M)
+function makeVar(fromIdx, moveList) {
+  const base = S.game.positions[fromIdx]
+  const fens = [base]
+  const c = new Chess(base)
+  const moves = []
+  for (const m of moveList) {
+    const mv = c.move({ from: m.from, to: m.to, promotion: m.promotion || undefined })
+    moves.push(mv); fens.push(c.fen())
+  }
+  return { type: 'explore', id: ++varSeq, fromIdx, fens, moves, cls: [], fb: [], i: moves.length, sel: null }
+}
+function sameUci(m, uci) { return (m.from + m.to) === uci.slice(0, 4) }
+function branchFrom(fromIdx, prefix, uci) {
+  const c = new Chess(S.game.positions[fromIdx])
+  for (const m of prefix) c.move({ from: m.from, to: m.to, promotion: m.promotion || undefined })
+  let mv
+  try { mv = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { return render() }
+  const all = [...prefix, mv]
+  // reuse an existing variation that already contains this exact line
+  const hit = S.vars.find((v) => v.fromIdx === fromIdx && v.moves.length >= all.length && all.every((m, j) => sameUci(v.moves[j], m.from + m.to)))
+  if (hit) return enterVar(hit, all.length)
+  const v = makeVar(fromIdx, all)
+  S.vars.push(v)
+  enterVar(v, v.moves.length)
+}
+function enterVar(v, i) {
+  stopTimer()
+  S.mode = v
+  v.i = Math.max(1, Math.min(v.moves.length, i))
+  v.sel = null
+  render()
+  analyseVar(v)
+}
+async function analyseVar(v) {
+  // analyse the positions around the cursor (before and after the current move)
+  for (const j of [v.i - 1, v.i]) {
+    const fen = v.fens[j]
+    if (!fen || anFor(fen)) continue
+    const ch = new Chess(fen)
+    S.anCache[fen] = ch.isGameOver() ? { lines: [] } : await getStockfish().u.analyse(fen, { depth: 14, movetime: 1000 })
+  }
+  classifyVar(v)
   render()
 }
-function classifyExplore(M) {
-  for (let j = 0; j < M.moves.length; j++) {
-    if (M.cls[j]) continue
-    const before = M.an[M.fens[j]], after = M.an[M.fens[j + 1]]
+function classifyVar(v) {
+  for (let j = 0; j < v.moves.length; j++) {
+    if (v.cls[j]) continue
+    const before = anFor(v.fens[j]), after = anFor(v.fens[j + 1])
     if (!before || !after) continue
-    const m = M.moves[j], c = m.color
-    const ib = R.evalInfo(M.fens[j], before), ia = R.evalInfo(M.fens[j + 1], after)
+    const m = v.moves[j], c = m.color
+    const ib = R.evalInfo(v.fens[j], before), ia = R.evalInfo(v.fens[j + 1], after)
     if (!ib || !ia) continue
     const wb = c === 'w' ? ib.wpW : 100 - ib.wpW, wa = c === 'w' ? ia.wpW : 100 - ia.wpW
     const uci = m.from + m.to + (m.promotion || '')
     const best = before.lines?.[0]?.pv?.[0]
     const loss = uci === best ? 0 : Math.max(0, wb - wa) / 100
-    M.cls[j] = uci === best || loss < 0.001 ? 'best' : loss < 0.02 ? 'excellent' : loss < 0.05 ? 'good' : loss < 0.10 ? 'inaccuracy' : loss < 0.20 ? 'mistake' : 'blunder'
-    if (['inaccuracy', 'mistake', 'blunder'].includes(M.cls[j])) {
-      const fb = R.attemptFeedback(M.fens[j], uci, after, c, wb)
-      const bm = best ? R.playLine(M.fens[j], [best]).moves[0]?.san : null
-      M.fb[j] = (fb ? fb.text.replace(/ não é o melhor/, ' não é o melhor lance') : '') + (bm ? ` Melhor era ${bm}.` : '')
+    v.cls[j] = uci === best || loss < 0.001 ? 'best' : loss < 0.02 ? 'excellent' : loss < 0.05 ? 'good' : loss < 0.10 ? 'inaccuracy' : loss < 0.20 ? 'mistake' : 'blunder'
+    if (['inaccuracy', 'mistake', 'blunder'].includes(v.cls[j])) {
+      const fb = R.attemptFeedback(v.fens[j], uci, after, c, wb)
+      const bm = best ? R.playLine(v.fens[j], [best]).moves[0]?.san : null
+      v.fb[j] = (fb ? fb.text.replace(/ não é o melhor/, ' não é o melhor lance') : '') + (bm ? ` Melhor era ${bm}.` : '')
     }
   }
 }
 function exploreMove(uci) {
-  const M = S.mode
-  const ch = new Chess(M.fens[M.i])
-  let mv
-  try { mv = ch.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { return render() }
-  M.fens.length = M.i + 1; M.moves.length = M.i; M.cls.length = M.i; M.fb.length = M.i
-  M.fens.push(ch.fen()); M.moves.push(mv); M.i++
-  M.sel = null
-  render()
-  analyseExplore(M.fens[M.i - 1]).then(() => analyseExplore(M.fens[M.i]))
-}
-function exploreStep(d) { const M = S.mode; M.i = Math.max(0, Math.min(M.moves.length, M.i + d)); M.sel = null; render(); analyseExplore(M.fens[M.i]) }
-function renderExplorePanel(box) {
-  const M = S.mode, fen = M.fens[M.i]
-  const an = M.an[fen], info = an ? R.evalInfo(fen, an) : null
-  const turn = new Chess(fen).turn() === 'w' ? 'Brancas' : 'Pretas'
-  let seq = ''
-  M.moves.forEach((m, j) => {
-    const c = M.cls[j], C = c ? R.CLASSES[c] : null
-    seq += `<span class="lm${j + 1 === M.i ? ' cur' : ''}" data-j="${j + 1}">${C ? `<i class="dot" style="background:${C.color}"></i>` : ''}${esc(m.san)}</span> `
-  })
-  let html = `<div class="coach-head"><div class="avatar">🔍</div><div><b>Explorando variante</b><div class="sub">a partir de ${esc(M.baseLabel)} · vez das ${turn} · avaliação ${info ? esc(info.text) : '…'}</div></div></div>`
-  if (!M.moves.length) html += `<p class="say">Arrasta as peças (ou clica na peça e depois na casa) pra testar lances. O Stockfish avalia cada um.</p>`
-  else html += `<p class="seq">${seq}</p>`
-  const j = M.i - 1
-  if (j >= 0) {
-    const c = M.cls[j]
-    if (!c) html += `<p class="say muted">Avaliando ${esc(M.moves[j].san)}…</p>`
-    else if (M.fb[j]) html += `<p class="say badmsg">${esc(M.fb[j])}</p>`
-    else html += `<p class="say good">${esc(M.moves[j].san)}: ${R.CLASSES[c].label.toLowerCase()}.</p>`
+  const v = S.mode
+  // same as the next move already in this variation: just step forward
+  if (v.i < v.moves.length && sameUci(v.moves[v.i], uci)) return enterVar(v, v.i + 1)
+  if (v.i === v.moves.length) {
+    const c = new Chess(v.fens[v.i])
+    let mv
+    try { mv = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { return render() }
+    v.moves.push(mv); v.fens.push(c.fen())
+    return enterVar(v, v.moves.length)
   }
-  const best = an?.lines?.[0]?.pv?.length ? R.playLine(fen, an.lines[0].pv, 4).moves.map((m) => m.san) : []
+  // a different move in the middle of the variation: new sub-variation, the old one is kept
+  return branchFrom(v.fromIdx, v.moves.slice(0, v.i), uci)
+}
+function varLabel(v) {
+  if (v.fromIdx === 0) return 'a posição inicial'
+  const p = S.game.plies[v.fromIdx - 1]
+  return `depois de ${Math.floor((v.fromIdx - 1) / 2) + 1}${p.color === 'w' ? '.' : '...'} ${p.san}`
+}
+function deleteVar(id) {
+  const v = S.vars.find((x) => x.id === id); if (!v) return
+  S.vars = S.vars.filter((x) => x !== v)
+  if (S.mode === v) go(v.fromIdx)
+  else render()
+}
+
+// ── Navigation (navbar + keyboard) works the same in any mode ───────────────
+function navStep(d) {
+  const M = S.mode
+  if (M && M.type === 'line') return lineStep(d)
+  if (M && M.type === 'explore') {
+    const i = M.i + d
+    if (i <= 0) return go(M.fromIdx) // back past the fork point: main line (variation stays saved)
+    return enterVar(M, i)
+  }
+  if (M && M.type === 'retry') return go(S.idx + d)
+  go(S.idx + d)
+}
+function navEnd() {
+  const M = S.mode
+  if (M && M.type === 'explore') return enterVar(M, M.moves.length)
+  if (M && M.type === 'line') { stopTimer(); M.playing = false; M.i = M.moves.length; return render() }
+  go(S.game.plies.length)
+}
+
+function renderExplorePanel(box) {
+  const v = S.mode, fen = v.fens[v.i]
+  const an = anFor(fen), info = an ? R.evalInfo(fen, an) : null
+  const turn = new Chess(fen).turn() === 'w' ? 'Brancas' : 'Pretas'
+  let html = `<div class="coach-head"><div class="avatar">🔍</div><div><b>Variante</b> <span class="tag">${esc(varLabel(v))}</span><div class="sub">vez das ${turn} · avaliação ${info ? esc(info.text) : '…'} · ◀ no começo volta pra partida, a variante fica salva no histórico</div></div></div>`
+  const j = v.i - 1
+  const m = v.moves[j]
+  if (m) {
+    const c = v.cls[j]
+    if (!c) html += `<p class="say muted">Avaliando ${esc(m.san)}…</p>`
+    else if (v.fb[j]) html += `<p class="say badmsg">${esc(v.fb[j])}</p>`
+    else html += `<p class="say good">${esc(m.san)}: ${R.CLASSES[c].label.toLowerCase()}.</p>`
+  }
+  const best = an?.lines?.[0]?.pv?.length ? R.playLine(fen, an.lines[0].pv, 4).moves.map((x) => x.san) : []
   if (best.length) html += `<p class="human">Melhor aqui: <b>${esc(best[0])}</b> <span class="muted">(${esc(best.join(' '))})</span></p>`
-  html += `<div class="acts"><button class="btn act" data-act="xprev">◀</button><button class="btn act" data-act="xnext">▶</button>`
+  html += `<div class="acts">`
   if (best.length) html += `<button class="btn act" data-act="xbest">Jogar o melhor</button>`
-  html += `<button class="btn act" data-act="exit">✕ Voltar pra partida</button></div>`
+  html += `<button class="btn act" data-act="exit">↩ Voltar pra partida</button><button class="btn act" data-act="xdel">🗑 Apagar variante</button></div>`
   box.innerHTML = html
 }
 
@@ -757,19 +835,18 @@ function renderModePanel(box) {
 function onCoachAction(e) {
   const b = e.target.closest('[data-act]')
   const lm = e.target.closest('.lm')
-  if (lm && S.mode?.type === 'explore') { S.mode.i = +lm.dataset.j; render(); analyseExplore(S.mode.fens[S.mode.i]); return }
   if (b && S.mode?.type === 'explore') {
-    const act = b.dataset.act
-    if (act === 'xprev') return exploreStep(-1)
-    if (act === 'xnext') return exploreStep(1)
-    if (act === 'xbest') { const u = S.mode.an[S.mode.fens[S.mode.i]]?.lines?.[0]?.pv?.[0]; if (u) exploreMove(u); return }
-    if (act === 'exit') return exitMode()
+    const act = b.dataset.act, v = S.mode
+    if (act === 'xbest') { const u = anFor(v.fens[v.i])?.lines?.[0]?.pv?.[0]; if (u) exploreMove(u); return }
+    if (act === 'exit') return go(v.fromIdx)
+    if (act === 'xdel') return deleteVar(v.id)
   }
   if (lm && S.mode?.type === 'line') { stopTimer(); S.mode.playing = false; S.mode.i = +lm.dataset.j; return render() }
   if (!b) return
   const k = S.mode ? S.mode.k : S.idx - 1
   const act = b.dataset.act
   if (act === 'retry') startRetry(k)
+  else if (act === 'punishTry') { go(k + 1); startRetry(k + 1) }
   else if (act === 'best') startLine(k, 'best')
   else if (act === 'punish') startLine(k, 'punish')
   else if (act === 'exit') exitMode()
@@ -790,9 +867,22 @@ function onCoachAction(e) {
 }
 
 // ── Move list / graph / summary ─────────────────────────────────────────────
+function varRowHtml(v) {
+  let html = `<div class="varrow${S.mode === v ? ' on' : ''}"><span class="vmoves">`
+  v.moves.forEach((m, j) => {
+    const ply = v.fromIdx + j
+    const num = ply % 2 === 0 ? `${ply / 2 + 1}. ` : j === 0 ? `${(ply - 1) / 2 + 1}... ` : ''
+    const c = v.cls[j], C = c ? R.CLASSES[c] : null
+    html += `${num ? `<span class="vno">${num}</span>` : ''}<button class="vmv${S.mode === v && v.i === j + 1 ? ' cur' : ''}" data-var="${v.id}" data-j="${j + 1}">${C ? `<i class="dot" style="background:${C.color}" title="${C.label}"></i>` : ''}${esc(m.san)}</button> `
+  })
+  return html + `</span><button class="vdel" data-del="${v.id}" title="Apagar variante">✕</button></div>`
+}
 function buildMoveList() {
   const g = S.game
+  const vars = S.vars || []
+  const rowOf = (v) => (g.plies.length ? Math.floor(Math.min(v.fromIdx, g.plies.length - 1) / 2) : -1)
   let html = ''
+  if (!g.plies.length) for (const v of vars) html += varRowHtml(v)
   for (let k = 0; k < g.plies.length; k += 2) {
     html += `<div class="row"><span class="no">${k / 2 + 1}.</span>`
     for (const j of [k, k + 1]) {
@@ -803,19 +893,30 @@ function buildMoveList() {
       }
     }
     html += `</div>`
+    for (const v of vars) if (rowOf(v) === k / 2) html += varRowHtml(v)
   }
-  $('#moves').innerHTML = html
-  $('#moves').onclick = (e) => { const b = e.target.closest('button.mv'); if (b) go(+b.dataset.i) }
+  const box = $('#moves')
+  const top = box.scrollTop
+  box.innerHTML = html
+  box.scrollTop = top
+  box.onclick = (e) => {
+    const del = e.target.closest('[data-del]'); if (del) return deleteVar(+del.dataset.del)
+    const vb = e.target.closest('[data-var]'); if (vb) { const v = S.vars.find((x) => x.id === +vb.dataset.var); if (v) enterVar(v, +vb.dataset.j); return }
+    const b = e.target.closest('button.mv'); if (b) go(+b.dataset.i)
+  }
 }
 function renderMoveList() {
+  buildMoveList()
   S.game.plies.forEach((p, k) => {
     const el = $('#mv' + (k + 1))
     const r = S.cls[k]
-    el.classList.toggle('cur', S.idx === k + 1)
+    el.classList.toggle('cur', !S.mode && S.idx === k + 1)
+    el.classList.toggle('fork', S.mode?.type === 'explore' && S.mode.fromIdx === k)
     const d = el.querySelector('.dot')
     if (r) { d.style.background = R.CLASSES[r.cls].color; d.title = R.CLASSES[r.cls].label; el.dataset.cls = r.cls }
   })
-  $('#mv' + S.idx)?.scrollIntoView({ block: 'nearest' })
+  const cur = S.mode?.type === 'explore' ? $('#moves .vmv.cur') : $('#mv' + S.idx)
+  cur?.scrollIntoView({ block: 'nearest' })
 }
 function renderGraph() {
   const n = S.game.positions.length
@@ -866,9 +967,10 @@ function renderSummary() {
 function render() {
   if (!S.game) return
   renderBoard(); renderCoach(); renderMoveList(); renderGraph()
-  $('#counter').textContent = `${S.idx}/${S.game.plies.length}`
+  $('#counter').textContent = S.mode?.type === 'explore' ? 'variante' : `${S.idx}/${S.game.plies.length}`
 }
 function go(i) {
+  S.sel = null
   if (S.mode) { stopTimer(); S.mode = null }
   S.idx = Math.max(0, Math.min(S.game.plies.length, i))
   render()
@@ -907,9 +1009,9 @@ function annotatedPgn() {
 function init() {
   initSetup()
   $('#first').onclick = () => go(0)
-  $('#prev').onclick = () => go(S.idx - 1)
-  $('#next').onclick = () => go(S.idx + 1)
-  $('#last').onclick = () => go(S.game.plies.length)
+  $('#prev').onclick = () => navStep(-1)
+  $('#next').onclick = () => navStep(1)
+  $('#last').onclick = () => navEnd()
   $('#prevErr').onclick = () => jumpError(-1)
   $('#nextErr').onclick = () => jumpError(1)
   $('#flip').onclick = () => { S.flip = !S.flip; render() }
@@ -934,13 +1036,11 @@ function init() {
   }
   document.addEventListener('keydown', (e) => {
     if (document.body.dataset.view !== 'review' || e.target.matches('textarea,input,select')) return
-    if (S.mode?.type === 'explore' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { exploreStep(e.key === 'ArrowLeft' ? -1 : 1); e.preventDefault(); return }
-    if (S.mode?.type === 'line' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { lineStep(e.key === 'ArrowLeft' ? -1 : 1); e.preventDefault(); return }
-    if (e.key === 'Escape' && S.mode) { exitMode(); return }
-    if (e.key === 'ArrowLeft') { go(S.idx - 1); e.preventDefault() }
-    else if (e.key === 'ArrowRight') { go(S.idx + 1); e.preventDefault() }
+    if (e.key === 'Escape' && S.mode) { S.mode.type === 'explore' ? go(S.mode.fromIdx) : exitMode(); return }
+    if (e.key === 'ArrowLeft') { navStep(-1); e.preventDefault() }
+    else if (e.key === 'ArrowRight') { navStep(1); e.preventDefault() }
     else if (e.key === 'Home') go(0)
-    else if (e.key === 'End') go(S.game.plies.length)
+    else if (e.key === 'End') navEnd()
   })
   show('setup')
 }

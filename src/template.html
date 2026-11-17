@@ -126,6 +126,15 @@ p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
 #moves button.mv{position:relative}
 #moves .tm{margin-left:auto;font-size:11px;color:var(--muted);font-weight:400;font-family:ui-monospace,Menlo,monospace}
 #moves .tbar{position:absolute;left:8px;bottom:1px;height:2px;border-radius:1px;background:#6b6966}
+.varrow{display:flex;align-items:flex-start;gap:6px;margin:2px 0 4px 38px;padding:4px 6px;border-left:3px solid #4a8fd6;background:#2b2926;border-radius:0 6px 6px 0;font-size:13.5px}
+.varrow.on{background:#2f3a47}
+.varrow .vmoves{flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:2px}
+.vno{color:var(--muted);font-size:12px}
+.vmv{background:none;border:0;padding:2px 5px;border-radius:4px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.vmv:hover{background:var(--panel2)}.vmv.cur{background:#4a8fd6;color:#fff}
+.vmv .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.vdel{background:none;border:0;color:var(--muted);cursor:pointer;padding:2px 6px;border-radius:4px}.vdel:hover{background:#5a2b2b;color:#fff}
+#moves button.mv.fork{outline:2px dashed #4a8fd6;outline-offset:-2px}
 @media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
 </style>
 </head>

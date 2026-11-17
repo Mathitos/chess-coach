@@ -97,6 +97,18 @@ describe('engine (Stockfish) + classificação', () => {
     assert.ok(acc.w > 0 && acc.w < 100 && acc.b > 0 && acc.b < 100)
   })
 
+  test('lance ruim do adversário vira chance de punir (perspectiva do usuário)', { timeout: 240000 }, async () => {
+    const r = await review(read('game2.pgn'), 10)
+    const badOpp = r.cls.map((c, k) => [c, k]).filter(([c, k]) => r.game.plies[k].color === 'b' && ['mistake', 'blunder'].includes(c.cls))
+    assert.ok(badOpp.length > 0)
+    for (const [, k] of badOpp) {
+      const t = R.coachText(r.game, r.sf, r.threats, r.cls, k, null, { third: true })
+      assert.match(t.text, /^O adversário/)
+      assert.match(t.text, /Sua chance de punir/)
+      assert.doesNotMatch(t.text, /Você ignorou|Sua chance de vitória caiu/)
+    }
+  })
+
   test('16.Qxh5 (entrega a dama por um bispo) é no mínimo erro', { timeout: 240000 }, async () => {
     const r = await review(read('game.pgn'), 10)
     const k = r.game.plies.findIndex((p) => p.san === 'Qxh5')
