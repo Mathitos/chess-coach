@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 
 const DIST = new URL('../dist/', import.meta.url).pathname
 const read = (f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm' }
+const MIME = { '.png': 'image/png', '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm' }
 let server, browser, base
 
 before(async () => {
@@ -182,6 +182,9 @@ describe('app', () => {
     const { page, errors } = await newPage()
     assert.equal(await page.locator('#acct button').count(), 0) // sem client id do Google: sem botão de login
     assert.equal(await page.isVisible('#loginModal'), false) // nem popup de login
+    assert.equal(await page.title(), 'Chess Coach')
+    const icon = await page.evaluate(async () => { const r = await fetch(document.querySelector('link[rel=icon]').href); return r.ok && r.headers.get('content-type') })
+    assert.match(String(icon), /png/)
     assert.match(await page.textContent('#chal'), /Nenhum desafio ainda/)
     assert.equal(await page.isVisible('#trainBtn'), false) // na tela inicial o treino fica no card
     await page.fill('#pgn', read('game2.pgn'))
