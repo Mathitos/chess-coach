@@ -2,6 +2,8 @@
 
 Review de partidas de xadrez lance a lance, no estilo do Game Review do chess.com, rodando **100% no navegador**: sem servidor, sem API key, sem conta.
 
+**App:** https://mathitos.github.io/chess-coach/
+
 Cola o PGN da partida (chess.com ou Lichess) e o app:
 
 - **classifica cada lance** (Brilhante, Ótimo, Melhor, Excelente, Bom, Imprecisão, Erro, Chance perdida, Capivarada) e calcula a precisão de cada jogador;
@@ -33,7 +35,7 @@ npm run build      # gera dist/
 npm run serve      # http://localhost:8765
 ```
 
-`dist/` é um site estático: dá pra hospedar em GitHub Pages, Netlify, Cloudflare Pages etc. O Stockfish e o Maia rodam em Web Workers; não precisa de `SharedArrayBuffer`/COOP/COEP.
+`dist/` é um site estático: dá pra hospedar em GitHub Pages, Netlify, Cloudflare Pages etc. Este repo publica no GitHub Pages a cada push na `main` (`.github/workflows/pages.yml`). O Stockfish e o Maia rodam em Web Workers; não precisa de `SharedArrayBuffer`/COOP/COEP.
 
 O modelo do Maia (`assets/maia3_simplified.onnx`, 45 MB) é dividido em 3 partes no build e baixado pelo navegador na primeira análise.
 
