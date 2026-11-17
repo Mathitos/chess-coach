@@ -111,6 +111,21 @@ p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
 #analyzing.done .spin{animation:none;border-color:var(--green);background:var(--green)}
 #analyzing.error{border-left-color:#fa412d}#analyzing.error .spin{animation:none;border-color:#fa412d}
 @keyframes sp{to{transform:rotate(360deg)}}
+#detect{margin-top:10px;font-size:14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#detect .kind{color:var(--muted)}
+#detect select{background:#1f1d1b;border:1px solid #4a4744;border-radius:6px;padding:6px;max-width:100%}
+.chip{background:var(--panel2);border:2px solid transparent;border-radius:20px;padding:6px 12px;cursor:pointer;font-weight:600}
+.chip.on{border-color:var(--green);background:#3d4a2f}
+.pbar{display:flex;align-items:center;gap:10px;margin:6px 0 6px 34px;font-weight:600}
+.pbar .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pbar .elo{color:var(--muted);font-weight:400}
+.clock{font-family:ui-monospace,Menlo,monospace;font-size:20px;padding:4px 12px;border-radius:5px;background:#2b2926;color:#8b8987;min-width:92px;text-align:right}
+.clock.white{background:#e8e6e3;color:#9a9893}
+.clock.on{color:#111;background:#fff}.clock.on.black{color:#fff;background:#4b4847}
+.clock.low{color:#fff!important;background:#c33!important}
+#moves button.mv{position:relative}
+#moves .tm{margin-left:auto;font-size:11px;color:var(--muted);font-weight:400;font-family:ui-monospace,Menlo,monospace}
+#moves .tbar{position:absolute;left:8px;bottom:1px;height:2px;border-radius:1px;background:#6b6966}
 @media (max-width:900px){#review{grid-template-columns:1fr}main{padding:10px}}
 </style>
 </head>
@@ -119,12 +134,12 @@ p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
 <main>
 <section id="setup">
   <div class="card">
-    <h2>Cola o PGN da partida</h2>
-    <p class="lead">No chess.com: na partida, Compartilhar → PGN → copiar. Funciona com Lichess também.</p>
-    <textarea id="pgn" placeholder="[Event &quot;Live Chess&quot;]&#10;...&#10;1. e4 e5 2. Nf3 ..."></textarea>
+    <h2>Cola a partida</h2>
+    <p class="lead">Aceita o que o chess.com e o Lichess compartilham: <b>PGN</b> (com ou sem tempo, uma ou várias partidas), <b>link da partida</b> ou <b>FEN</b> (abre a posição pra explorar).</p>
+    <textarea id="pgn" placeholder="[Event &quot;Live Chess&quot;]&#10;...&#10;1. e4 e5 2. Nf3 ...&#10;&#10;ou https://www.chess.com/game/live/123456789&#10;ou um FEN"></textarea>
+    <div id="detect"></div>
     <div class="opts">
-      <label>Seu usuário (pra saber seu lado)<input type="text" id="user" placeholder="ex: matheus_anzzulin"></label>
-      <label>Revisar como<select id="side"><option value="auto">Automático</option><option value="w">Brancas</option><option value="b">Pretas</option></select></label>
+      <label>Seu usuário no chess.com/Lichess<input type="text" id="user" placeholder="ex: matheus_anzzulin"></label>
       <label>Profundidade<select id="depth"><option value="fast">Rápida (prof. 12)</option><option value="normal">Normal (prof. 16)</option><option value="deep">Profunda (prof. 20)</option></select></label>
       <label>Nível do Maia<select id="maiaLevel"><option value="auto">Rating da partida</option><option>600</option><option>800</option><option>1000</option><option>1200</option><option>1400</option><option>1600</option><option>1800</option><option>2000</option><option>2200</option><option>2400</option><option>2600</option></select></label>
       <label class="chk"><input type="checkbox" id="useMaia" checked> Usar Maia (lance humano)</label>
@@ -137,7 +152,9 @@ p.say.good{color:#a8d17c}p.say.badmsg{color:#ffb4a8}
 <section id="review" hidden>
   <div id="analyzing" hidden><div class="spin"></div><div class="an-body"><div class="an-top"><b id="an-title">Analisando a partida…</b><span id="an-detail"></span></div><div class="prog big"><div id="anbar"></div></div><div id="an-maia" class="an-maia"></div></div></div>
   <div>
+    <div class="pbar" id="pTop"></div>
     <div class="boardwrap"><div id="evalbar"><div id="evalfill"></div><div id="evaltxt">0.0</div></div><div id="board"></div></div>
+    <div class="pbar" id="pBot"></div>
     <div class="navbar">
       <button class="btn" id="first" title="Início">⏮</button><button class="btn" id="prev" title="Anterior (←)">◀</button><span id="counter"></span><button class="btn" id="next" title="Próximo (→)">▶</button><button class="btn" id="last" title="Fim">⏭</button>
       <span class="grow"></span>

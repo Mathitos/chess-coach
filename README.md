@@ -4,14 +4,18 @@ Review de partidas de xadrez lance a lance, no estilo do Game Review do chess.co
 
 **App:** https://mathitos.github.io/chess-coach/
 
-Cola o PGN da partida (chess.com ou Lichess) e o app:
+Cola a partida do jeito que o chess.com ou o Lichess compartilham (PGN com ou sem tempo, arquivo com várias partidas, link da partida ou FEN) e o app:
 
 - **classifica cada lance** (Brilhante, Ótimo, Melhor, Excelente, Bom, Imprecisão, Erro, Chance perdida, Capivarada) e calcula a precisão de cada jogador;
 - **explica o porquê**: peça pendurada, garfo, cravada, mate permitido, ameaça ignorada, rei exposto, peças sem desenvolver, roque pro lado errado, e o que o melhor lance faria;
 - **mostra o que humanos do seu nível jogariam** (Maia-3), inclusive quem acharia o melhor lance em cada faixa de rating;
 - **Tentar de novo**: nos seus erros, você joga no tabuleiro e o Stockfish confere se achou um lance bom;
 - **Ver continuação**: anima no tabuleiro a melhor linha e a punição do adversário;
+- mostra o **relógio** de cada jogador em cada momento e o **tempo gasto** em cada lance (a partir do `[%clk]` do PGN);
+- **explorar variantes**: arrasta qualquer peça pra testar lances, com avaliação e classificação do Stockfish;
 - exporta o **PGN anotado** com os comentários.
+
+Links do chess.com são buscados pela [API pública](https://www.chess.com/news/view/published-data-api) no arquivo do usuário informado (últimos 3 meses); links do Lichess pela API de export. Isso depende de CORS do navegador, então não funciona dentro do claude.ai, só na versão hospedada.
 
 ## Como funciona
 

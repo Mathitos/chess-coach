@@ -78,10 +78,85 @@ function initSetup() {
   $('#depth').value = store.get('depth', 'normal')
   $('#useMaia').checked = store.get('useMaia', true)
   $('#maiaLevel').value = String(store.get('maiaLevel', 'auto'))
-  $('#sample').onclick = () => { $('#pgn').value = SAMPLE; $('#user').value ||= 'matheus_anzzulin' }
+  $('#sample').onclick = () => { $('#pgn').value = SAMPLE; $('#user').value ||= 'matheus_anzzulin'; updateDetect() }
   $('#go').onclick = start
+  $('#pgn').addEventListener('input', () => { clearTimeout(S.detT); S.detT = setTimeout(updateDetect, 250) })
+  $('#user').addEventListener('change', updateDetect)
+  $('#detect').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip'); if (!c) return
+    S.pick = c.dataset.side
+    const h = currentHeaders()
+    const nm = S.pick === 'w' ? h.White : h.Black
+    if (nm) { $('#user').value = nm; store.set('user', nm) }
+    updateDetect()
+  })
+  $('#detect').addEventListener('change', (e) => { if (e.target.id === 'gamePick') { S.gameIdx = +e.target.value; S.pick = null; updateDetect() } })
+  updateDetect()
   $('#newGame').onclick = () => { S.runId++; resetStockfish(); show('setup') }
 }
+
+// ── Input detection (PGN / multi-game PGN / link / FEN) ─────────────────────
+function currentHeaders() {
+  const d = S.det
+  if (!d || d.kind !== 'pgn' || !d.games.length) return {}
+  return R.gameSummary(d.games[Math.min(S.gameIdx || 0, d.games.length - 1)])
+}
+function autoSide(h) {
+  const u = ($('#user').value || '').trim().toLowerCase()
+  if (u && (h.Black || '').toLowerCase() === u) return 'b'
+  if (u && (h.White || '').toLowerCase() === u) return 'w'
+  return null
+}
+function updateDetect() {
+  const d = R.detectInput($('#pgn').value)
+  const prevCount = S.det?.kind === 'pgn' ? S.det.games.length : -1
+  S.det = d
+  const el = $('#detect')
+  if (d.kind === 'empty') { el.innerHTML = ''; return }
+  if (d.kind === 'error') { el.innerHTML = `<span class="kind">${esc(d.message)}</span>`; return }
+  if (d.kind === 'fen') { el.innerHTML = `<span class="kind">♟ FEN: abre a posição no modo explorar (sem review de partida).</span>`; return }
+  if (d.kind === 'link') {
+    const site = d.site === 'lichess' ? 'Lichess' : 'chess.com'
+    el.innerHTML = `<span class="kind">🔗 Link do ${site}: vou buscar a partida${d.site === 'chesscom' ? ' no arquivo do usuário acima' : ''}. Só funciona na versão do GitHub Pages; no claude.ai cola o PGN.</span>`
+    return
+  }
+  let html = ''
+  if (d.games.length > 1) {
+    if (prevCount !== d.games.length) S.gameIdx = d.games.length - 1
+    html += `<select id="gamePick">${d.games.map((g, i) => { const h = R.gameSummary(g); return `<option value="${i}"${i === S.gameIdx ? ' selected' : ''}>${i + 1}. ${esc(h.White || '?')} x ${esc(h.Black || '?')} · ${esc(h.Date || '')} · ${esc(h.Result || '')}</option>` }).join('')}</select>`
+  } else S.gameIdx = 0
+  const h = currentHeaders()
+  if (h.White || h.Black) {
+    const auto = autoSide(h)
+    if (!S.pick || (auto && auto !== S.pick)) S.pick = auto
+    html += `<span class="kind">Eu joguei de:</span>`
+    html += `<button class="chip${S.pick === 'w' ? ' on' : ''}" data-side="w">♔ ${esc(h.White || 'Brancas')}${h.WhiteElo ? ' (' + esc(h.WhiteElo) + ')' : ''}</button>`
+    html += `<button class="chip${S.pick === 'b' ? ' on' : ''}" data-side="b">♚ ${esc(h.Black || 'Pretas')}${h.BlackElo ? ' (' + esc(h.BlackElo) + ')' : ''}</button>`
+  } else html += `<span class="kind">PGN sem cabeçalho: revisando como Brancas (dá pra virar o tabuleiro depois).</span>`
+  el.innerHTML = html
+}
+
+// ── Links: fetch the PGN from Lichess / chess.com public APIs ───────────────
+async function fetchLinkPgn(d) {
+  if (d.site === 'lichess') {
+    const r = await fetch(`https://lichess.org/game/export/${d.id}?clocks=true&evals=false&literate=false`, { headers: { Accept: 'application/x-chess-pgn' }, signal: AbortSignal.timeout(15000) })
+    if (!r.ok) throw new Error(`o Lichess respondeu ${r.status}`)
+    return await r.text()
+  }
+  const user = ($('#user').value || '').trim()
+  if (!user) throw new Error('preencha seu usuário do chess.com pra eu achar a partida no seu arquivo')
+  const arch = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(user.toLowerCase())}/games/archives`, { signal: AbortSignal.timeout(15000) })
+  if (!arch.ok) throw new Error(`o chess.com respondeu ${arch.status} pro usuário ${user}`)
+  const months = ((await arch.json()).archives || []).slice(-3).reverse()
+  for (const url of months) {
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) })
+    if (!r.ok) continue
+    const g = ((await r.json()).games || []).find((x) => String(x.url || '').endsWith('/' + d.id))
+    if (g && g.pgn) return g.pgn
+  }
+  throw new Error(`não achei a partida ${d.id} nos últimos 3 meses de ${user}. O link é de uma partida sua?`)
+}
+
 function show(which) {
   $('#setup').hidden = which !== 'setup'
   $('#review').hidden = which !== 'review'
@@ -96,19 +171,29 @@ function status(key, text) {
 
 async function start() {
   const text = $('#pgn').value
-  let game
-  try { game = R.parseGame(text) } catch (e) { $('#err').textContent = 'Não consegui ler esse PGN: ' + e.message; return }
-  if (!game.plies.length) { $('#err').textContent = 'O PGN não tem lances.'; return }
+  const d = R.detectInput(text)
   $('#err').textContent = ''
   const user = $('#user').value.trim()
   store.set('lastPgn', text); store.set('user', user); store.set('depth', $('#depth').value)
   store.set('useMaia', $('#useMaia').checked); store.set('maiaLevel', $('#maiaLevel').value)
+  if (d.kind === 'empty') { $('#err').textContent = 'Cola um PGN, link ou FEN.'; return }
+  if (d.kind === 'error') { $('#err').textContent = d.message; return }
+  if (d.kind === 'fen') return startPosition(d.fen)
+  let pgn
+  if (d.kind === 'link') {
+    $('#go').disabled = true; $('#go').textContent = 'Buscando partida…'
+    try { pgn = await fetchLinkPgn(d) } catch (e) {
+      const blocked = e instanceof TypeError || e?.name === 'TimeoutError' || e?.name === 'AbortError'
+      $('#err').textContent = blocked ? 'Não consegui buscar a partida pelo link (o navegador bloqueou a conexão; no claude.ai links não funcionam). Cola o PGN.' : 'Não consegui buscar a partida: ' + e.message
+      return
+    } finally { $('#go').disabled = false; $('#go').textContent = 'Revisar partida' }
+  } else pgn = d.games[Math.min(S.gameIdx || 0, d.games.length - 1)]
+  let game
+  try { game = R.parseGame(pgn) } catch (e) { $('#err').textContent = 'Não consegui ler esse PGN: ' + e.message; return }
+  if (!game.plies.length) { $('#err').textContent = 'O PGN não tem lances.'; return }
   const h = game.headers
-  let side = $('#side').value
-  if (side === 'auto') {
-    if (user && (h.Black || '').toLowerCase() === user.toLowerCase()) side = 'b'
-    else side = 'w'
-  }
+  let side = (d.kind === 'pgn' && S.pick) || autoSide(h) || 'w'
+  S.clock = R.clockData(game, pgn)
   const lvlSel = $('#maiaLevel').value
   const lvl = (elo) => (lvlSel === 'auto' ? Math.max(600, Math.min(2600, Math.round((+elo || 1000) / 100) * 100)) : +lvlSel)
   Object.assign(S, { game, sf: new Array(game.positions.length), threats: new Array(game.plies.length), infos: [], cls: [], maia: [], maiaRaw: {}, idx: 0, side, flip: side === 'b', maiaElo: { w: lvl(h.WhiteElo), b: lvl(h.BlackElo) } })
@@ -122,6 +207,21 @@ async function start() {
   runStockfish(runId)
   if ($('#useMaia').checked) runMaia(runId)
   else { status('maia', 'desligado'); $('#maiaBox').hidden = true }
+}
+
+function startPosition(fen) {
+  const game = { headers: {}, plies: [], positions: [fen] }
+  Object.assign(S, { game, sf: [], threats: [], infos: [], cls: [], maia: [], maiaRaw: {}, idx: 0, side: fen.split(' ')[1], flip: fen.split(' ')[1] === 'b', clock: null })
+  S.runId++
+  resetStockfish()
+  show('review')
+  $('#analyzing').hidden = true
+  $('#players').innerHTML = '<span class="pl">Posição colada (FEN)</span>'
+  $('#summary').hidden = true
+  status('sf', 'modo explorar'); status('maia', 'desligado')
+  buildMoveList()
+  startExplore(fen, 'a posição colada')
+  render()
 }
 
 async function runStockfish(runId) {
@@ -340,6 +440,24 @@ function renderBoard() {
   $('#evalbar').style.background = flip ? '#fff' : '#403d39'
   $('#evaltxt').textContent = info ? info.text.replace('+', '') : '…'
   $('#evaltxt').className = (wp >= 50) !== flip ? 'bottom' : 'top'
+  renderPlayerBars(new Chess(V.fen))
+}
+
+function renderPlayerBars(ch) {
+  const h = S.game.headers, i = S.idx
+  const at = S.clock ? S.clock.at[Math.min(i, S.clock.at.length - 1)] : null
+  const over = !S.mode && i === S.game.plies.length && S.game.plies.length > 0
+  const bar = (c) => {
+    const nm = c === 'w' ? h.White || 'Brancas' : h.Black || 'Pretas', elo = c === 'w' ? h.WhiteElo : h.BlackElo
+    const active = !over && ch.turn() === c
+    const t = at ? at[c] : null
+    const low = t !== null && S.clock && t < Math.min(30, S.clock.base * 0.1)
+    return `<span class="nm">${c === 'w' ? '♔' : '♚'} ${esc(nm)} ${elo ? `<span class="elo">(${esc(elo)})</span>` : ''}${c === S.side ? ' <span class="tag">você</span>' : ''}</span>` +
+      (at ? `<span class="clock ${c === 'w' ? 'white' : 'black'}${active ? ' on' : ''}${low ? ' low' : ''}">${R.fmtClock(t)}</span>` : '')
+  }
+  const top = S.flip ? 'w' : 'b'
+  $('#pTop').innerHTML = bar(top)
+  $('#pBot').innerHTML = bar(top === 'w' ? 'b' : 'w')
 }
 
 // ── Coach panel ─────────────────────────────────────────────────────────────
@@ -358,8 +476,10 @@ function renderCoach() {
   const C = R.CLASSES[r.cls]
   const t = R.coachText(g, S.sf.map((x) => x || { lines: [] }), S.threats, S.cls, k, S.maia.length ? S.maia : null, { third: !mine })
   const who = mine ? '' : `<span class="tag">adversário</span>`
-  let html = `<div class="coach-head"><div class="badge" style="background:${C.color}">${C.sym}</div><div><b>${esc(moveLbl)}</b> é <b style="color:${C.color}">${C.label.toLowerCase()}</b> ${who}<div class="sub">avaliação ${esc(r.after.text)} · ${mine ? 'sua chance' : 'chance dele'} ${Math.round(r.wpBefore)}% → ${Math.round(r.wpAfter)}%</div></div></div>`
+  let html = `<div class="coach-head"><div class="badge" style="background:${C.color}">${C.sym}</div><div><b>${esc(moveLbl)}</b> é <b style="color:${C.color}">${C.label.toLowerCase()}</b> ${who}<div class="sub">avaliação ${esc(r.after.text)} · ${mine ? 'sua chance' : 'chance dele'} ${Math.round(r.wpBefore)}% → ${Math.round(r.wpAfter)}%${S.clock && S.clock.spent[k] != null ? ` · ⏱ ${R.fmtSpent(S.clock.spent[k])}` : ''}</div></div></div>`
   html += `<p class="say">${esc(t.text)}</p>`
+  const sp = S.clock ? S.clock.spent[k] : null
+  if (mine && sp !== null && sp !== undefined && ['mistake', 'blunder', 'miss'].includes(r.cls) && sp <= 3) html += `<p class="tip">⏱ Você jogou esse lance em ${R.fmtSpent(sp)}. Num momento crítico assim, vale gastar uns segundos conferindo o que o adversário ameaça.</p>`
   if (t.tip) html += `<p class="tip">💡 ${esc(t.tip)}</p>`
   const bad = ['inaccuracy', 'mistake', 'blunder', 'miss'].includes(r.cls)
   html += `<div class="acts">`
@@ -676,7 +796,11 @@ function buildMoveList() {
   for (let k = 0; k < g.plies.length; k += 2) {
     html += `<div class="row"><span class="no">${k / 2 + 1}.</span>`
     for (const j of [k, k + 1]) {
-      if (j < g.plies.length) html += `<button class="mv" data-i="${j + 1}" id="mv${j + 1}"><i class="dot"></i>${esc(g.plies[j].san)}</button>`
+      if (j < g.plies.length) {
+        const sp = S.clock ? S.clock.spent[j] : null
+        const mx = S.clock ? Math.max(1, ...S.clock.spent.filter((x) => x !== null)) : 1
+        html += `<button class="mv" data-i="${j + 1}" id="mv${j + 1}"><i class="dot"></i>${esc(g.plies[j].san)}${sp !== null && sp !== undefined ? `<span class="tm">${R.fmtSpent(sp)}</span><i class="tbar" style="width:${Math.max(2, (sp / mx) * 60)}%"></i>` : ''}</button>`
+      }
     }
     html += `</div>`
   }
@@ -695,6 +819,8 @@ function renderMoveList() {
 }
 function renderGraph() {
   const n = S.game.positions.length
+  $('#graph').hidden = n < 2
+  if (n < 2) return
   const W = 600, H = 90
   const pts = S.infos.map((inf, i) => (inf ? [(i / (n - 1)) * W, H - (inf.wpW / 100) * H] : null))
   let d = ''
@@ -712,6 +838,7 @@ function renderGraph() {
   $('#graph').innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><rect width="${W}" height="${H}" fill="#403d39"/><path d="${area}" fill="#fff"/><line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="#888" stroke-dasharray="3 3" stroke-width=".6"/><line x1="${cx}" x2="${cx}" y1="0" y2="${H}" stroke="#4a8fd6" stroke-width="2"/>${dots}</svg>`
 }
 function graphClick(e) {
+  if (S.game.positions.length < 2) return
   const rect = e.currentTarget.getBoundingClientRect()
   const n = S.game.positions.length
   go(Math.round(((e.clientX - rect.left) / rect.width) * (n - 1)))

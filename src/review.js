@@ -648,3 +648,89 @@ export function attemptFeedback(fenB, uci, analysis, color, wpBefore) {
   return { ok: false, san: m.san, wp, text: `${m.san} não é o melhor${why ? ': ' + why : ''}. Sua chance ficaria em ${Math.round(wp)}%.` }
 }
 export { explainBest as explainBestMove, lineMotif }
+
+// ── Input formats ───────────────────────────────────────────────────────────
+const FEN_RE = /^\s*((?:[rnbqkpRNBQKP1-8]{1,8}\/){7}[rnbqkpRNBQKP1-8]{1,8})\s+([wb])(\s+[KQkq-]+\s+[a-h1-8-]+(\s+\d+\s+\d+)?)?\s*$/
+// Detects what the user pasted: chess.com/lichess link, FEN, or one or more PGN games.
+export function detectInput(text) {
+  const t = (text || '').trim()
+  if (!t) return { kind: 'empty' }
+  let m = /chess\.com\/(?:[a-z]{2}\/)?(?:analysis\/)?game\/(?:(live|daily)\/)?(\d+)/i.exec(t) || /chess\.com\/(live|daily)\/game\/(\d+)/i.exec(t)
+  if (m && !/^\s*\[/.test(t)) return { kind: 'link', site: 'chesscom', type: (m[1] || 'live').toLowerCase(), id: m[2] }
+  m = /lichess\.org\/(?:embed\/(?:game\/)?)?([A-Za-z0-9]{8})(?:[A-Za-z0-9]{4})?(?![A-Za-z0-9])/.exec(t)
+  if (m && !/^\s*\[/.test(t)) return { kind: 'link', site: 'lichess', id: m[1] }
+  if (FEN_RE.test(t)) {
+    const fen = t.split(/\s+/).length >= 6 ? t : (t + ' ' + ['-', '-', '0', '1'].slice(t.split(/\s+/).length - 2).join(' ')).trim()
+    try { new Chess(fen); return { kind: 'fen', fen } } catch (e) { return { kind: 'error', message: 'FEN inválido: ' + e.message } }
+  }
+  const games = splitGames(t)
+  return { kind: 'pgn', games }
+}
+// Splits a multi-game PGN (e.g. an archive download) into separate games.
+export function splitGames(t) {
+  const parts = t.replace(/\r/g, '').split(/\n\s*\n(?=\s*\[Event\s)/)
+  return parts.map((s) => s.trim()).filter(Boolean)
+}
+export function gameSummary(pgn) {
+  const h = {}
+  for (const m of pgn.matchAll(/^\s*\[(\w+)\s+"([^"]*)"\]/gm)) h[m[1]] = m[2]
+  return h
+}
+// [%clk] per ply (seconds remaining after the move), read in order from the movetext.
+export function extractClocks(pgn, nPlies) {
+  let body = pgn.replace(/\r/g, '').replace(/^\s*\[[^\]]*\]\s*$/gm, '')
+  // drop variations (nested parentheses), keeping comments
+  let prev
+  do { prev = body; body = body.replace(/\([^()]*\)/g, ' ') } while (body !== prev)
+  const clocks = new Array(nPlies).fill(null)
+  let ply = -1
+  const re = /\{([^}]*)\}|;[^\n]*|(\d+\.(?:\.\.)?)|(\$\d+)|(1-0|0-1|1\/2-1\/2|\*)|([^\s{}()]+)/g
+  let m
+  while ((m = re.exec(body))) {
+    if (m[1] !== undefined) {
+      const c = /\[%clk\s+(\d+):(\d+):(\d+(?:\.\d+)?)\]/.exec(m[1].replace(/\s+/g, ' '))
+      if (c && ply >= 0 && ply < nPlies) clocks[ply] = +c[1] * 3600 + +c[2] * 60 + +c[3]
+    } else if (m[5] !== undefined) {
+      if (/^\d+\.+$/.test(m[5])) continue
+      ply++
+    }
+  }
+  return clocks.some((x) => x !== null) ? clocks : null
+}
+export function parseTimeControl(tc) {
+  if (!tc || tc === '-' || tc === '?') return null
+  if (tc.includes('/')) return null // daily / correspondence
+  const [b, i] = tc.split('+')
+  const base = +b, inc = +(i || 0)
+  return isFinite(base) ? { base, inc } : null
+}
+// Remaining clock for each side at each position index and time spent per ply.
+export function clockData(game, pgn) {
+  const clocks = extractClocks(pgn, game.plies.length)
+  if (!clocks) return null
+  const tc = parseTimeControl(game.headers.TimeControl)
+  const base = tc ? tc.base : Math.max(...clocks.filter((x) => x !== null))
+  const inc = tc ? tc.inc : 0
+  const spent = []
+  const last = { w: base, b: base }
+  const at = [{ ...last }]
+  game.plies.forEach((p, k) => {
+    const c = clocks[k]
+    if (c !== null) { spent[k] = Math.max(0, last[p.color] - c + inc); last[p.color] = c }
+    else spent[k] = null
+    at.push({ ...last })
+  })
+  return { base, inc, spent, at }
+}
+export function fmtClock(s) {
+  if (s === null || s === undefined) return '-'
+  if (s >= 3600) return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+  if (s < 20) return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}.${Math.floor((s * 10) % 10)}`
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+}
+export function fmtSpent(s) {
+  if (s === null || s === undefined) return ''
+  if (s < 10) return s.toFixed(1) + 's'
+  if (s < 60) return Math.round(s) + 's'
+  return `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}`
+}
