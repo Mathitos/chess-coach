@@ -102,6 +102,42 @@ const lineWpFor = (line, stm, color) => {
 }
 const wpFor = (info, color) => (color === 'w' ? info.wpW : 100 - info.wpW)
 
+// ── Pontos esperados (chess.com Classification V2) ─────────────────────────
+// O chess.com estima a chance de vitória pela avaliação E pelo rating: pra quem
+// tem rating baixo, +3 ou +7 ainda não é jogo ganho (as partidas viram), então a
+// curva tem caudas gordas. Pontos de referência (rating de iniciante): +1 ≈ 0.60,
+// +3 ≈ 0.70, +7 ≈ 0.80, +15 ≈ 0.90, mate em 32 ≈ 0.95, mate em 2 ≈ 0.99.
+// Pra ratings altos a curva converge pra do Lichess.
+export const DEFAULT_ELO = 1500
+export function eloWeight(elo) { return Math.max(0, Math.min(1, ((+elo || DEFAULT_ELO) - 900) / 1300)) }
+export function expectedPoints(info, color, elo) {
+  if (!info) return null
+  const w = eloWeight(elo)
+  const sgn = color === 'w' ? 1 : -1
+  if (info.terminal === 'mate') return wpFor(info, color)
+  if (info.mateW !== undefined) {
+    const n = Math.max(1, Math.abs(info.mateW)), win = info.mateW * sgn > 0
+    const ep = 100 - (1 - w) * Math.log2(n) * 1.0 // 100, 99, 98, ... (pontos %)
+    return win ? ep : 100 - ep
+  }
+  const pawns = (info.cpW * sgn) / 100
+  const ap = Math.abs(pawns)
+  const fat = Math.sign(pawns) * 0.42 * (ap < 1 ? ap : ap ** 0.62) // linear perto de 0, cauda gorda depois de 1 peão
+  const logit = (1 - w) * fat + w * 0.368208 * pawns
+  return 100 / (1 + Math.exp(-logit))
+}
+const lineInfo = (line, stm) => {
+  if (!line) return null
+  const s = stm === 'w' ? 1 : -1
+  if (line.mate !== undefined) return { mateW: line.mate * s }
+  return { cpW: line.cp * s }
+}
+export function playerElos(game) {
+  const h = game.headers || {}
+  const n = (x) => (/^\d+$/.test(String(x || '')) ? +x : null)
+  return { w: n(h.WhiteElo) || n(h.BlackElo) || DEFAULT_ELO, b: n(h.BlackElo) || n(h.WhiteElo) || DEFAULT_ELO }
+}
+
 export function playLine(fen, uciList, max = 99) {
   const ch = new Chess(fen)
   const moves = []
@@ -236,6 +272,7 @@ function lineMotif(fen, line, stm) {
 export function classify(game, sf, opts = {}) {
   const { plies, positions } = game
   const infos = positions.map((f, i) => evalInfo(f, sf[i]))
+  const elos = opts.elos || playerElos(game)
   const out = []
   for (let k = 0; k < plies.length; k++) {
     const p = plies[k]
@@ -250,7 +287,9 @@ export function classify(game, sf, opts = {}) {
     const bestUci = bestLine && bestLine.pv[0]
     const wpBefore = wpFor(before, c)
     const wpAfter = wpFor(after, c)
-    let loss = p.uci === bestUci ? 0 : Math.max(0, wpBefore - wpAfter) / 100
+    const elo = elos[c]
+    const epBefore = expectedPoints(before, c, elo), epAfter = expectedPoints(after, c, elo)
+    let loss = p.uci === bestUci ? 0 : Math.max(0, epBefore - epAfter) / 100
     let cls
     if (legal === 1) cls = 'forced'
     else if (p.uci === bestUci || loss < 0.001) cls = 'best'
@@ -260,29 +299,46 @@ export function classify(game, sf, opts = {}) {
     else if (loss < 0.20) cls = 'mistake'
     else cls = 'blunder'
 
-    // Material floor: for coaching, giving away a lot of material is never just an inaccuracy
-    // (the win% curve flattens when a side is already behind).
-    let matLoss = 0
+    // Material: quanto o lance jogado perde (ownLoss, contra o material de agora) e
+    // quanto o melhor lance ganharia (missedGain). matLoss = diferença entre os dois.
+    let matLoss = 0, ownLoss = 0, missedGain = 0
+    const replyLine = sf[k + 1] && sf[k + 1].lines && sf[k + 1].lines[0]
     if (bestLine && sf[k + 1] && cls !== 'forced' && p.uci !== bestUci) {
-      const replyPv = (sf[k + 1].lines && sf[k + 1].lines[0] && sf[k + 1].lines[0].pv) || []
-      matLoss = pvMaterial(fen, bestLine.pv, c).delta - pvMaterial(fen, [p.uci, ...replyPv], c).delta
-      if (wpAfter < 90) {
-        if (matLoss >= 7 && ['good', 'excellent', 'inaccuracy', 'mistake'].includes(cls)) cls = 'blunder'
-        else if (matLoss >= 4 && ['good', 'excellent', 'inaccuracy'].includes(cls)) cls = 'mistake'
+      const played = pvMaterial(fen, [p.uci, ...((replyLine && replyLine.pv) || [])], c).delta
+      missedGain = Math.max(0, pvMaterial(fen, bestLine.pv, c).delta)
+      ownLoss = Math.max(0, -played)
+      matLoss = missedGain - played
+      // Pra coaching, entregar muito material numa posição ainda em jogo nunca é só imprecisão.
+      if (epBefore >= 15 && epBefore <= 85 && epAfter < 85) {
+        if (ownLoss >= 7 && ['good', 'excellent', 'inaccuracy', 'mistake'].includes(cls)) cls = 'blunder'
+        else if (ownLoss >= 4 && ['good', 'excellent', 'inaccuracy'].includes(cls)) cls = 'mistake'
       }
     }
     const prev = out[k - 1]
-    // Miss: opponent just erred and we gave the chance back without collapsing.
-    if ((cls === 'mistake' || cls === 'blunder') && prev && prev.loss >= 0.10 && wpAfter >= 35) cls = 'miss'
+    // chess.com: blunder precisa perder material ou permitir mate forçado; sem isso,
+    // o lance ruim ou é Miss (não aproveitou a chance) ou no máximo erro.
+    const allowsMate = after.mateW !== undefined && (c === 'w' ? after.mateW < 0 : after.mateW > 0) && !(before.mateW !== undefined && (c === 'w' ? before.mateW < 0 : before.mateW > 0))
+    const hadMate = before.mateW !== undefined && (c === 'w' ? before.mateW > 0 : before.mateW < 0)
+    if (cls === 'mistake' || cls === 'blunder') {
+      const concrete = ownLoss >= 1 || allowsMate || epAfter < 30 // perdeu material, permitiu mate ou desmontou a posição
+      const chance = missedGain >= 2 || hadMate || (prev && prev.loss >= 0.10)
+      if (!concrete && chance) cls = 'miss'
+      else if (!concrete && cls === 'blunder') cls = 'mistake'
+    }
 
     // Great: only good move (2nd best much worse), not an obvious recapture.
     const second = lines[1]
-    const wpSecond = second ? lineWpFor(second, c, c) : null
+    const stm = chB.turn()
+    const epBest = expectedPoints(lineInfo(bestLine, stm), c, elo)
+    const wpSecond = second ? expectedPoints(lineInfo(second, stm), c, elo) : null
     const recapture = (k > 0 && plies[k - 1].captured && p.to === plies[k - 1].to) ||
       (p.captured && (VAL[p.captured] > VAL[p.piece] || hangingValue(chB, p.to) >= VAL[p.captured]))
     if ((cls === 'best' || cls === 'excellent') && legal > 1 && wpSecond !== null && !recapture) {
-      const gap = lineWpFor(bestLine, c, c) - wpSecond
-      if (gap >= 15 && wpBefore > 8 && wpBefore < 92) cls = 'great'
+      const gap = epBest - wpSecond
+      // único lance bom (o 2º melhor perde muito) ou virada: perdendo -> igual, igual -> ganhando
+      const only = gap >= 10 && epBefore > 10 && epBefore < 90
+      const punish = prev && prev.loss >= 0.10 && gap >= 6 && epAfter >= 60 && epBefore < 95
+      if (only || punish) cls = 'great'
     }
     // Brilliant: good piece sacrifice.
     let sac = null
@@ -292,11 +348,16 @@ export function classify(game, sf, opts = {}) {
       const capVal = p.captured ? VAL[p.captured] : 0
       const top = hang[0]
       if (top && top.amount - capVal >= 2) {
-        const wasHanging = top.sq !== p.to && hangingValue(chB, top.sq) >= 2
-        if (!wasHanging && wpAfter >= 50 && wpBefore < 97 && !chA.isCheckmate()) { cls = 'brilliant'; sac = top }
+        // não é sacrifício se a peça já estava pendurada (onde estava ou na casa de origem)
+        const wasHanging = top.sq !== p.to ? hangingValue(chB, top.sq) >= 2 : hangingValue(chB, p.from) >= Math.min(top.amount, VAL[p.piece])
+        // chess.com: não pode ficar mal depois, nem estar ganhando de qualquer jeito sem o lance
+        const winningAnyway = wpSecond !== null && wpSecond >= 80
+        // o adversário precisa poder tomar a peça já (depois de um xeque, por exemplo, nem sempre pode)
+        const takeable = chA.moves({ verbose: true }).some((m) => m.to === top.sq)
+        if (!wasHanging && !winningAnyway && takeable && epAfter >= 45 && loss < 0.02 && !chA.isCheckmate()) { cls = 'brilliant'; sac = top }
       }
     }
-    out.push({ k, cls, loss, matLoss, wpBefore, wpAfter, bestUci, before, after, sac, accuracy: moveAccuracy(wpBefore, wpAfter) })
+    out.push({ k, cls, loss, matLoss, ownLoss, wpBefore, wpAfter, epBefore, epAfter, bestUci, before, after, sac, accuracy: moveAccuracy(epBefore, epAfter) })
   }
   return out
 }
@@ -304,12 +365,13 @@ export function classify(game, sf, opts = {}) {
 export const moveAccuracy = (wb, wa) => Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * Math.max(0, wb - wa)) - 3.1669 + 1))
 
 // Lichess-style game accuracy per color.
-export function gameAccuracy(game, infos, cls) {
-  const wps = infos.map((i) => (i ? i.wpW : null))
-  const n = wps.length
+export function gameAccuracy(game, infos, cls, opts = {}) {
+  const elos = opts.elos || playerElos(game)
+  const n = infos.length
   const win = Math.max(2, Math.min(8, Math.floor(n / 10)))
   const res = {}
   for (const color of ['w', 'b']) {
+    const wps = infos.map((i) => (i ? expectedPoints(i, 'w', elos[color]) : null))
     const acc = [], w = []
     cls.forEach((r, k) => {
       if (!r || game.plies[k].color !== color) return
