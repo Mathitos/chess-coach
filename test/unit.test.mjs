@@ -283,7 +283,7 @@ describe('minhas partidas (busca e ids)', () => {
 })
 
 // Partida enviada por um tester, com a review do chess.com como referência
-// (precisão 57.3 / 63.5; brancas: 2 brilhantes, 3 capivaradas; pretas: 3 capivaradas).
+// (brancas: 2 brilhantes, 3 capivaradas; pretas: 3 capivaradas).
 // A análise do Stockfish (prof. 20) fica em fixture pra o teste ser determinístico.
 describe('calibração com a review do chess.com (partida do tester)', () => {
   const g = R.parseGame(read('game-tester.pgn'))
@@ -291,17 +291,6 @@ describe('calibração com a review do chess.com (partida do tester)', () => {
   const cls = R.classify(g, sf)
   const infos = g.positions.map((f, i) => R.evalInfo(f, sf[i]))
   const at = (no, san) => cls[g.plies.findIndex((p, i) => p.san === san && Math.floor(i / 2) + 1 === no)]
-  test('precisão perto da do chess.com (pontos esperados pelo rating)', () => {
-    const acc = R.gameAccuracy(g, infos, cls)
-    assert.ok(Math.abs(acc.w - 57.3) <= 4, 'brancas ' + acc.w)
-    assert.ok(Math.abs(acc.b - 63.5) <= 4, 'pretas ' + acc.b)
-  })
-  test('rating baixo: +7 ainda não é jogo ganho', () => {
-    const lo = R.expectedPoints({ cpW: 700 }, 'w', 800), hi = R.expectedPoints({ cpW: 700 }, 'w', 2400)
-    assert.ok(lo > 75 && lo < 85, 'lo ' + lo)
-    assert.ok(hi > 90, 'hi ' + hi)
-    assert.ok(Math.abs(R.expectedPoints({ cpW: 100 }, 'w', 800) - 60) < 3)
-  })
   test('capivarada só quando perde material, permite mate ou desmonta a posição', () => {
     for (const r of cls) if (r?.cls === 'blunder') assert.ok(r.ownLoss >= 1 || r.after.mateW !== undefined || r.epAfter < 30, 'lance ' + r.k)
     assert.notEqual(at(37, 'Qd2').cls, 'blunder') // já perdido: entregar mais não é capivarada

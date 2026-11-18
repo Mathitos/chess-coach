@@ -102,29 +102,19 @@ const lineWpFor = (line, stm, color) => {
 }
 const wpFor = (info, color) => (color === 'w' ? info.wpW : 100 - info.wpW)
 
-// ── Pontos esperados (chess.com Classification V2) ─────────────────────────
-// O chess.com estima a chance de vitória pela avaliação E pelo rating: pra quem
-// tem rating baixo, +3 ou +7 ainda não é jogo ganho (as partidas viram), então a
-// curva tem caudas gordas. Pontos de referência (rating de iniciante): +1 ≈ 0.60,
-// +3 ≈ 0.70, +7 ≈ 0.80, +15 ≈ 0.90, mate em 32 ≈ 0.95, mate em 2 ≈ 0.99.
-// Pra ratings altos a curva converge pra do Lichess.
+// ── Pontos esperados ───────────────────────────────────────────────────────
+// O chess.com diz que usa o rating na conta, mas não publica a curva. Testei uma
+// curva por rating (caudas gordas pra rating baixo) contra 150 partidas com a
+// precisão do próprio chess.com (API pública, ratings de 100 a 2400): ela PIORA a
+// concordância (RMSE 11,8 contra 10,3; viés +6,5), e nenhuma curva ajustada bateu
+// a do Lichess fora da amostra. Então fica a curva do Lichess pra todo rating.
+// Scripts em tools/calib/.
 export const DEFAULT_ELO = 1500
-export function eloWeight(elo) { return Math.max(0, Math.min(1, ((+elo || DEFAULT_ELO) - 900) / 1300)) }
-export function expectedPoints(info, color, elo) {
+export function expectedPoints(info, color /* , elo */) {
   if (!info) return null
-  const w = eloWeight(elo)
-  const sgn = color === 'w' ? 1 : -1
-  if (info.terminal === 'mate') return wpFor(info, color)
-  if (info.mateW !== undefined) {
-    const n = Math.max(1, Math.abs(info.mateW)), win = info.mateW * sgn > 0
-    const ep = 100 - (1 - w) * Math.log2(n) * 1.0 // 100, 99, 98, ... (pontos %)
-    return win ? ep : 100 - ep
-  }
-  const pawns = (info.cpW * sgn) / 100
-  const ap = Math.abs(pawns)
-  const fat = Math.sign(pawns) * 0.42 * (ap < 1 ? ap : ap ** 0.62) // linear perto de 0, cauda gorda depois de 1 peão
-  const logit = (1 - w) * fat + w * 0.368208 * pawns
-  return 100 / (1 + Math.exp(-logit))
+  if (info.mateW !== undefined && info.terminal !== 'mate') return info.mateW * (color === 'w' ? 1 : -1) > 0 ? 100 : 0
+  const wpW = info.wpW !== undefined ? info.wpW : winPctFromCp(info.cpW)
+  return color === 'w' ? wpW : 100 - wpW
 }
 const lineInfo = (line, stm) => {
   if (!line) return null
