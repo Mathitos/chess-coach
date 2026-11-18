@@ -1708,7 +1708,7 @@ function renderSummary() {
     if (!counts.w[c] && !counts.b[c]) continue
     html += `<tr class="cl" data-cls="${c}"><td><span class="badge sm" style="background:${C.color}">${C.sym}</span> ${C.label}</td><td>${counts.w[c] || 0}</td><td>${counts.b[c] || 0}</td></tr>`
   }
-  html += '</table>'
+  html += '</table><p class="muted sm" style="margin:8px 2px 0;line-height:1.4">Classificação no estilo do chess.com, pela análise do Stockfish e as regras que eles publicam. Pode variar em alguns lances.</p>'
   $('#summary').innerHTML = html
   $('#summary').hidden = false
 }

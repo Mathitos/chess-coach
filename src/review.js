@@ -344,7 +344,12 @@ export function classify(game, sf, opts = {}) {
         const winningAnyway = wpSecond !== null && wpSecond >= 80
         // o adversário precisa poder tomar a peça já (depois de um xeque, por exemplo, nem sempre pode)
         const takeable = chA.moves({ verbose: true }).some((m) => m.to === top.sq)
-        if (!wasHanging && !winningAnyway && takeable && epAfter >= 45 && loss < 0.02 && !chA.isCheckmate()) { cls = 'brilliant'; sac = top }
+        // peça condenada: se no 2º melhor lance você também perde esse material, não é
+        // sacrifício (ex.: cavalo preso que só escapa entregando-se)
+        const bestDelta = pvMaterial(fen, bestLine.pv, c).delta
+        const secondDelta = second && second.pv && second.pv.length ? pvMaterial(fen, second.pv, c).delta : null
+        const doomed = secondDelta !== null && secondDelta <= -2 && secondDelta <= bestDelta - 2
+        if (!wasHanging && !winningAnyway && takeable && !doomed && epAfter >= 45 && loss < 0.02 && !chA.isCheckmate()) { cls = 'brilliant'; sac = top }
       }
     }
     out.push({ k, cls, loss, matLoss, ownLoss, wpBefore, wpAfter, epBefore, epAfter, bestUci, before, after, sac, accuracy: moveAccuracy(epBefore, epAfter) })

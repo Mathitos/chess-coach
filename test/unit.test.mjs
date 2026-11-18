@@ -298,8 +298,10 @@ describe('calibração com a review do chess.com (partida do tester)', () => {
   test('brilhante: sacrifício de verdade, sem falso positivo de xeque', () => {
     assert.equal(at(21, 'Rb7').cls, 'brilliant')
     assert.notEqual(at(40, 'Qd4+').cls, 'brilliant') // depois do xeque o adversário não pode tomar nada
+    assert.notEqual(at(25, 'Nf5').cls, 'brilliant') // cavalo preso: perdia de qualquer jeito, não é sacrifício
+    assert.notEqual(at(26, 'Nxd6').cls, 'brilliant')
     const nBril = cls.filter((r, k) => r?.cls === 'brilliant' && g.plies[k].color === 'w').length
-    assert.ok(nBril <= 3, 'brilhantes ' + nBril)
+    assert.ok(nBril >= 1 && nBril <= 2, 'brilhantes ' + nBril) // chess.com: 2
   })
 })
 
