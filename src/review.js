@@ -352,7 +352,10 @@ export function classify(game, sf, opts = {}) {
         if (!wasHanging && !winningAnyway && takeable && !doomed && epAfter >= 45 && loss < 0.02 && !chA.isCheckmate()) { cls = 'brilliant'; sac = top }
       }
     }
-    out.push({ k, cls, loss, matLoss, ownLoss, wpBefore, wpAfter, epBefore, epAfter, bestUci, before, after, sac, accuracy: moveAccuracy(epBefore, epAfter) })
+    // mate forçado que escapou: tinha mate e depois do lance não tem mais
+    const keepsMate = after.mateW !== undefined && (c === 'w' ? after.mateW > 0 : after.mateW < 0)
+    const missedMate = hadMate && !keepsMate && p.uci !== bestUci && after.terminal !== 'mate' ? Math.abs(before.mateW) : 0
+    out.push({ k, cls, loss, matLoss, ownLoss, missedMate, wpBefore, wpAfter, epBefore, epAfter, bestUci, before, after, sac, accuracy: moveAccuracy(epBefore, epAfter) })
   }
   return out
 }

@@ -542,15 +542,16 @@ function renderCoach() {
   const ctx = [g.positions[k], g.positions[k + 1]]
   S.lastVisuals = t.visuals || []
   html += `<p class="say">${linkify(t.text, ctx)}</p>`
+  if (r.missedMate) html += `<p class="tip matemiss">♚ ${mine ? 'Você tinha' : 'O adversário tinha'} <b>mate em ${r.missedMate}</b> aqui, começando com ${linkify(t.bestSan || '', ctx)}.${mine ? ' Clica em "Mostrar o mate" pra ver a sequência.' : ''}</p>`
   const sp = S.clock ? S.clock.spent[k] : null
   if (mine && sp !== null && sp !== undefined && ['mistake', 'blunder', 'miss'].includes(r.cls) && sp <= 3) html += `<p class="tip">⏱ Você jogou esse lance em ${R.fmtSpent(sp)}. Num momento crítico assim, vale gastar uns segundos conferindo o que o adversário ameaça.</p>`
   if (t.tip) html += `<p class="tip">💡 ${linkify(t.tip, ctx)}</p>`
   if (S.lastVisuals.length) html += `<div class="acts vis">${S.lastVisuals.map((v, i) => `<button class="btn act ghost${S.overlayIdx === i ? ' on' : ''}" data-vis="${i}" title="${v.note ? esc(v.note) : ''}">👁 ${esc(v.label)}</button>`).join('')}</div>`
   const bad = ['inaccuracy', 'mistake', 'blunder', 'miss'].includes(r.cls)
   html += `<div class="acts">`
-  if (mine && bad) html += `<button class="btn act retry" data-act="retry">↻ Tentar de novo</button>`
+  if (mine && (bad || r.missedMate)) html += `<button class="btn act retry" data-act="retry">↻ ${r.missedMate ? 'Achar o mate' : 'Tentar de novo'}</button>`
   if (!mine && bad && g.plies[k + 1] && S.cls[k + 1]) html += `<button class="btn act retry" data-act="punishTry">🎯 Achar a punição</button>`
-  if (t.bestLine.length && r.cls !== 'forced') html += `<button class="btn act" data-act="best">▶ ${r.cls === 'best' || p.uci === r.bestUci ? 'Explicar a continuação' : 'Explicar ' + esc(t.bestSan)}</button>`
+  if (t.bestLine.length && r.cls !== 'forced') html += `<button class="btn act" data-act="best">▶ ${r.missedMate ? 'Mostrar o mate' : r.cls === 'best' || p.uci === r.bestUci ? 'Explicar a continuação' : 'Explicar ' + esc(t.bestSan)}</button>`
   if (t.replySan.length && bad) html += `<button class="btn act" data-act="punish">▶ ${r.cls === 'miss' ? 'Ver o que acontece depois' : mine ? 'Ver como o adversário pune' : 'Ver como punir'}</button>`
   html += `</div>`
   // Maia
@@ -634,6 +635,12 @@ async function tryMove(uci) {
     const an = ch.isGameOver() ? { lines: [] } : await getStockfish().u.analyse(ch.fen(), { depth: 14, movetime: 1200 })
     if (S.mode !== M) return
     const fb = R.attemptFeedback(M.fen, uci, an, c, r.wpBefore, S.sf[k]?.lines?.[0])
+    // com mate na mesa, só vale lance que mantém o mate forçado (ou já dá mate)
+    const l0 = an.lines?.[0]
+    if (r.missedMate && !ch.isCheckmate() && !(l0 && l0.mate !== undefined && l0.mate < 0)) {
+      fb.ok = false
+      fb.text = `${san} ainda deixa você bem, mas o mate forçado escapa. Tem mate em ${r.missedMate}: procura os xeques.`
+    }
     if (fb.ok) Object.assign(M, { ok: true, solved: uci, msg: `Boa! ${fb.text} O engine preferia ${R.playLine(M.fen, [bestUci]).moves[0]?.san}.` })
     else Object.assign(M, { ok: false, wrong: uci, msg: fb.text + (M.tries >= 2 && !M.hint ? ' Quer uma dica?' : '') })
   } catch (e) { M.msg = 'Não consegui conferir: ' + e.message }
@@ -951,7 +958,7 @@ function keyMoments(A = S) {
   A.cls.forEach((r, k) => {
     if (!r) return
     const p = g.plies[k], mine = p.color === A.side
-    if (mine && ['mistake', 'blunder', 'miss'].includes(r.cls)) out.push({ k, at: k, type: 'erro', label: `${R.CLASSES[r.cls].label}: ${moveName(k, g)}` })
+    if (mine && (['mistake', 'blunder', 'miss'].includes(r.cls) || r.missedMate)) out.push({ k, at: k, type: 'erro', label: `${r.missedMate ? `Mate em ${r.missedMate} perdido` : R.CLASSES[r.cls].label}: ${moveName(k, g)}` })
     else if (mine && ['brilliant', 'great'].includes(r.cls)) out.push({ k, at: k + 1, type: 'bom', label: `${R.CLASSES[r.cls].label}: ${moveName(k, g)}` })
     else if (!mine && ['mistake', 'blunder'].includes(r.cls) && g.plies[k + 1] && A.cls[k + 1]) out.push({ k, at: k + 1, type: 'chance', label: `Erro do adversário: ${moveName(k, g)}` })
   })
@@ -1103,7 +1110,7 @@ function puzzlePrompt(p) {
     const opp = p.oppSan || (/jogar (\S+)\. Ache/.exec(p.prompt || '') || [])[1]
     return opp ? `O adversário acabou de jogar ${opp}. Ache a punição!` : `Vez das ${side}. Ache a punição!`
   }
-  return `Vez das ${side}. Ache o melhor lance.`
+  return p.mate ? `Vez das ${side}. Tem mate em ${p.mate}: ache o primeiro lance.` : `Vez das ${side}. Ache o melhor lance.`
 }
 function puzzleTitle(p) {
   const n = +(p.fen.split(' ')[5] || 1)
@@ -1176,7 +1183,7 @@ function makePuzzles(A = S) {
       wpBefore: color === 'w' ? info.wpW : 100 - info.wpW, type: m.type,
       idea: R.explainBestMove(fen, line, color, motif, A.threats[kt]),
       prompt: m.type === 'erro' ? `Na partida você jogou ${g.plies[kt].san} aqui (${R.CLASSES[A.cls[kt].cls].label.toLowerCase()}). Ache um lance melhor.` : `O adversário acabou de jogar ${g.plies[m.k].san}. Ache a punição!`,
-      ply: kt,
+      ply: kt, mate: m.type === 'erro' && A.cls[kt]?.missedMate ? A.cls[kt].missedMate : undefined,
       played: g.plies[kt].san, oppSan: kt > 0 ? g.plies[kt - 1].san : undefined,
       last: kt > 0 ? { from: g.plies[kt - 1].from, to: g.plies[kt - 1].to } : null, prevFen: kt > 0 ? g.positions[kt - 1] : null,
       game: { id: gid, white: h.White || '', black: h.Black || '', date: h.UTCDate || h.Date || '', result: h.Result || '', link: h.Link || h.Site || '' },
@@ -1496,7 +1503,8 @@ function onRecentClick(e) {
 let DRILLS = null, drillsLoading = null
 function loadDrills() {
   if (DRILLS) return Promise.resolve(DRILLS)
-  return (drillsLoading ||= fetch('drills.json').then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then((d) => (DRILLS = d)).catch((e) => { drillsLoading = null; throw e }))
+  const get = (f) => fetch(f).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
+  return (drillsLoading ||= Promise.all([get('drills.json'), get('custom-drills.json').catch(() => ({}))]).then(([d, c]) => (DRILLS = D.withCustom(d, c))).catch((e) => { drillsLoading = null; throw e }))
 }
 function renderDrills() {
   const el = $('#drillsCard'); if (!el) return
@@ -1510,12 +1518,15 @@ function renderDrills() {
   let html = head + '<p class="ch-p">Temas clássicos em fases de dificuldade. Resolva 7 de 10 pra liberar a próxima fase.</p><ul class="dlist">'
   for (const t of D.THEMES) {
     const ts = D.themeStats(st, DRILLS, t.key)
+    if (!ts.total) continue
     const open = S.drillOpen === t.key
-    html += `<li class="${open ? 'open' : ''}"><button class="dtheme" data-dtheme="${t.key}" aria-expanded="${open}"><span class="dic">${t.icon}</span><span class="dname"><b>${esc(t.label)}</b><span>${esc(t.goal)}</span></span><span class="dprog">${ts.solved}/${ts.total}</span></button>`
+    html += `<li class="${open ? 'open' : ''}"><button class="dtheme" data-dtheme="${t.key}" aria-expanded="${open}"><span class="dic">${t.icon}</span><span class="dname"><b>${esc(t.label)}</b><span>${esc(t.goal || 'Posições escolhidas a dedo: ache o xeque-mate.')}</span></span><span class="dprog">${ts.solved}/${ts.total}</span></button>`
     if (open) {
-      html += '<div class="dfases">' + D.FASES.map((f, i) => {
+      const fases = D.fasesOf(t.key)
+      html += `<div class="dfases" style="grid-template-columns:repeat(${fases.length},minmax(0,1fr))">` + fases.map((f, i) => {
         const fs = D.faseStats(st, DRILLS, t.key, i), un = D.unlocked(st, DRILLS, t.key, i)
-        return `<button class="dfase${fs.solved >= fs.total && fs.total ? ' full' : ''}" data-dfase="${i}" data-dt="${t.key}" ${un ? '' : 'disabled'} title="${un ? `Puzzles de rating ${f.range}` : `Resolva ${D.UNLOCK} da fase anterior pra liberar`}"><b>${un ? '' : '🔒 '}${f.label}</b><span>${fs.solved}/${fs.total}</span><i class="bar2"><span style="width:${fs.total ? Math.round((fs.solved / fs.total) * 100) : 0}%"></span></i></button>`
+        const empty = !fs.total
+        return `<button class="dfase${fs.solved >= fs.total && fs.total ? ' full' : ''}" data-dfase="${i}" data-dt="${t.key}" ${un && !empty ? '' : 'disabled'} title="${empty ? 'Nenhum puzzle ainda' : un ? (f.range ? `Puzzles de rating ${f.range}` : f.label) : `Resolva ${D.UNLOCK} da fase anterior pra liberar`}"><b>${un ? '' : '🔒 '}${f.label}</b><span>${fs.solved}/${fs.total}</span><i class="bar2"><span style="width:${fs.total ? Math.round((fs.solved / fs.total) * 100) : 0}%"></span></i></button>`
       }).join('') + '</div>'
     }
     html += '</li>'
@@ -1536,7 +1547,7 @@ async function startDrill(theme, f) {
   const st = S.store
   // não resolvidos primeiro, mantendo a ordem de dificuldade
   const queue = [...list.filter((d) => !st.drills?.[d.id]), ...list.filter((d) => st.drills?.[d.id])]
-  if (!S.training && S.game) S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
+  if (!S.training && S.game?.plies?.length && document.body.dataset.view === 'review') S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
   stopAuto(); stopTimer()
   S.training = { kind: 'drill', theme, fase: f, queue, pos: 0, done: 0, ok: 0, solved: 0 }
   document.body.classList.add('training')
@@ -1553,22 +1564,38 @@ function openDrill() {
 }
 function drillWhy(M, ch, mv) {
   const t = D.themeMeta(M.d.theme)
-  const mate = /^mate|backRank/i.test(M.d.theme)
+  const mate = D.isMateTheme(M.d.theme)
   if (mate && !ch.inCheck()) return 'Num mate quase sempre o lance começa com xeque ou tira a última casa de fuga do rei.'
   if (mate && ch.inCheck()) return 'É xeque, mas o rei ainda escapa. ' + t.tip
   return t.tip
 }
-function tryDrill(uci) {
+async function tryDrill(uci) {
   const M = S.mode, d = M.d
+  if (M.busy) return
   const ch = new Chess(M.fen)
   let mv
   try { mv = ch.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { return render() }
   M.tries++; M.sel = null; M.wrong = null
-  if (!D.check(d, M.step, M.fen, uci)) {
-    Object.assign(M, { clean: false, ok: false, wrong: uci, msg: `${mv.san} não é a resposta. ${drillWhy(M, ch, mv)}${M.tries >= 2 && !M.hint ? ' Quer uma dica?' : ''}` })
+  const left = M.dyn ? M.left : (d.sol.length - M.step + 1) / 2 // seus lances que faltam, contando este
+  let ok = !M.dyn && D.check(d, M.step, M.fen, uci)
+  let reply = ok && left > 1 ? d.sol[M.step + 1] : null
+  if (!ok && ch.isCheckmate()) ok = true // mate é sempre resposta certa
+  // outro caminho que também força o mate a tempo: o Stockfish confere e responde
+  if (!ok && left > 1 && D.isMateTheme(d.theme)) {
+    Object.assign(M, { busy: true, pending: uci, msg: `Conferindo ${mv.san}…` }); render()
+    try {
+      const an = await getStockfish().u.analyse(ch.fen(), { depth: 16, movetime: 1500 })
+      const l = an.lines?.[0]
+      if (S.mode !== M) return
+      if (l && l.mate !== undefined && l.mate < 0 && -l.mate <= left - 1) { ok = true; reply = l.pv[0]; M.dyn = true }
+    } catch {}
+    Object.assign(M, { busy: false, pending: null })
+  }
+  if (!ok) {
+    Object.assign(M, { clean: false, ok: false, wrong: uci, msg: `${mv.san} não é a resposta. ${drillWhy(M, ch, mv)}${M.tries >= 2 && !M.hint && !M.dyn ? ' Quer uma dica?' : ''}` })
     return render()
   }
-  if (M.step >= d.sol.length - 1) {
+  if (ch.isCheckmate() || left <= 1 || !reply) {
     Object.assign(M, { ok: true, solved: uci, msg: `Isso! ${mv.san}${ch.isCheckmate() ? ', xeque-mate' : ''}.` })
     D.record(S.store, d.id, M.clean)
     S.training.done++; S.training.solved++; if (M.clean) S.training.ok++
@@ -1580,30 +1607,29 @@ function tryDrill(uci) {
   render()
   setTimeout(() => {
     if (S.mode !== M) return
-    const reply = d.sol[M.step + 1]
     const rm = ch.move({ from: reply.slice(0, 2), to: reply.slice(2, 4), promotion: reply[4] })
-    Object.assign(M, { fen: ch.fen(), step: M.step + 2, last: { from: rm.from, to: rm.to }, busy: false, pending: null, hint: null, ok: null, msg: `${rm.san}. Continue: ache o próximo lance.` })
+    Object.assign(M, { fen: ch.fen(), step: M.step + 2, left: left - 1, last: { from: rm.from, to: rm.to }, busy: false, pending: null, hint: null, ok: null, msg: `${rm.san}. Continue: ache o próximo lance.` })
     render()
   }, 700)
 }
 function renderDrillPanel(box) {
   const M = S.mode, T = S.training
-  const t = D.themeMeta(T.theme), F = D.FASES[T.fase]
+  const t = D.themeMeta(T.theme), FS = D.fasesOf(T.theme), F = FS[T.fase]
   if (M.done || !M.d) {
     const fs = D.faseStats(S.store, DRILLS, T.theme, T.fase)
-    const next = T.fase + 1 < D.FASES.length && D.unlocked(S.store, DRILLS, T.theme, T.fase + 1)
+    const next = T.fase + 1 < FS.length && D.faseStats(S.store, DRILLS, T.theme, T.fase + 1).total > 0 && D.unlocked(S.store, DRILLS, T.theme, T.fase + 1)
     box.innerHTML = `<div class="coach-head"><div class="avatar">🏁</div><div><b>${esc(t.label)} · ${F.label} concluída</b><div class="sub">${T.solved} de ${T.queue.length} resolvidos agora · ${T.ok} de primeira · fase: ${fs.solved}/${fs.total}</div></div></div>` +
-      `<p class="say">${next ? `${D.FASES[T.fase + 1].label} liberada! 🎉` : T.fase + 1 < D.FASES.length ? `Resolva ${D.UNLOCK} de ${fs.total} pra liberar a ${D.FASES[T.fase + 1].label}. Faltam ${Math.max(0, D.UNLOCK - fs.solved)}.` : 'Você chegou na última fase desse tema.'}</p>` +
+      `<p class="say">${t.free ? (fs.solved >= fs.total ? 'Você resolveu todos dessa fase. 👏' : `${fs.solved} de ${fs.total} resolvidos nessa fase.`) : next ? `${FS[T.fase + 1].label} liberada! 🎉` : T.fase + 1 < FS.length ? `Resolva ${D.UNLOCK} de ${fs.total} pra liberar a ${FS[T.fase + 1].label}. Faltam ${Math.max(0, D.UNLOCK - fs.solved)}.` : 'Você chegou na última fase desse tema.'}</p>` +
       `<div class="acts">${next ? '<button class="btn act retry" data-act="dnext">Próxima fase ▶</button>' : ''}<button class="btn act" data-act="tagain">Repetir fase</button><button class="btn act" data-act="texit">Sair do treino</button></div>`
     return
   }
   const d = M.d, side = d.color === 'w' ? 'Brancas' : 'Pretas'
-  let html = `<div class="coach-head"><div class="avatar">${t.icon}</div><div><b>${esc(t.label)} · ${F.label}</b><div class="sub">Puzzle ${T.pos + 1} de ${T.queue.length} · você joga de ${side} · rating ${d.rating}${S.store.drills?.[d.id] ? ' · já resolvido' : ''}</div></div></div>`
+  let html = `<div class="coach-head"><div class="avatar">${t.icon}</div><div><b>${esc(t.label)} · ${F.label}</b><div class="sub">Puzzle ${T.pos + 1} de ${T.queue.length} · você joga de ${side}${d.rating ? ' · rating ' + d.rating : ''}${S.store.drills?.[d.id] ? ' · já resolvido' : ''}</div></div></div>`
   if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
-  else html += `<p class="say">${M.step === 0 ? `O adversário jogou ${esc(d.last.san)}. ` : ''}${side} jogam. ${esc(t.goal)}</p>`
+  else html += `<p class="say">${M.step === 0 && d.last?.san ? `O adversário jogou ${esc(d.last.san)}. ` : ''}${side} jogam. ${esc(D.goalOf(d))}</p>`
   html += '<div class="acts">'
   if (!M.solved) {
-    if (!M.hint && !M.busy) html += '<button class="btn act" data-act="thint">💡 Dica</button>'
+    if (!M.hint && !M.busy && !M.dyn) html += '<button class="btn act" data-act="thint">💡 Dica</button>'
     if (!M.busy) html += '<button class="btn act" data-act="treveal">Mostrar resposta</button>'
   } else html += `<button class="btn act retry" data-act="tnext">${T.pos + 1 < T.queue.length ? 'Próximo puzzle ▶' : 'Ver resultado ▶'}</button>`
   html += '<button class="btn act" data-act="texit">Sair do treino</button></div>'
@@ -1618,7 +1644,7 @@ function startTraining(first) {
   if (!all.length) { alertBox('Você ainda não tem desafios salvos. Revise uma partida e clique em "💾 Salvar desafios".'); return }
   let queue = P.shuffleSpread(due.length ? due : all).slice(0, 15).map((p) => p.id)
   if (first?.length) queue = [...first, ...queue.filter((id) => !first.includes(id))]
-  if (!S.training && S.game) S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
+  if (!S.training && S.game?.plies?.length && document.body.dataset.view === 'review') S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
   stopAuto(); stopTimer()
   S.training = { queue, pos: 0, extra: !due.length, done: 0, ok: 0 }
   document.body.classList.add('training')
@@ -1717,6 +1743,16 @@ function trainAction(act) {
   if (act === 'dnext') { const k = T; S.training = null; return startDrill(k.theme, k.fase + 1) }
   if (act === 'tnext') { T.pos++; return T.pos < T.queue.length ? openPuzzle() : finishTraining() }
   if (act === 'thint' && M.drill) { M.hint = M.d.sol[M.step].slice(0, 2); M.clean = false; M.msg = `Dica: a peça certa está em ${M.hint}.`; M.ok = null; return render() }
+  if (act === 'treveal' && M.drill && M.dyn) {
+    getStockfish().u.analyse(M.fen, { depth: 16, movetime: 1500 }).then((an) => {
+      if (S.mode !== M) return
+      const pv = an.lines?.[0]?.pv || [], c = new Chess(M.fen)
+      const sans = pv.slice(0, 2 * M.left - 1).map((u) => c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }).san)
+      Object.assign(M, { solved: pv[0], ok: null, wrong: null, sel: null, msg: `Daqui: ${sans.join(' ')}. Tente de novo mais tarde pra contar na fase.` })
+      T.done++; render()
+    })
+    return
+  }
   if (act === 'treveal' && M.drill) {
     const want = M.d.sol[M.step], sans = D.solutionSan(M.d)
     Object.assign(M, { solved: want, ok: null, wrong: null, sel: null, msg: `A solução: ${sans.join(' ')}. Tente de novo mais tarde pra contar na fase.` })
@@ -1785,6 +1821,7 @@ function renderMoveList() {
     el.classList.toggle('fork', S.mode?.type === 'explore' && S.mode.fromIdx === k)
     const d = el.querySelector('.dot')
     if (r) { d.style.background = R.CLASSES[r.cls].color; d.title = R.CLASSES[r.cls].label; el.dataset.cls = r.cls }
+    if (r?.missedMate && !el.querySelector('.mm')) el.insertAdjacentHTML('beforeend', `<i class="mm" title="Mate em ${r.missedMate} perdido">♚</i>`)
   })
   const cur = S.mode?.type === 'explore' ? $('#moves .vmv.cur') : $('#mv' + S.idx)
   cur?.scrollIntoView({ block: 'nearest' })
@@ -1830,6 +1867,9 @@ function renderSummary() {
     if (!counts.w[c] && !counts.b[c]) continue
     html += `<tr class="cl" data-cls="${c}"><td><span class="badge sm" style="background:${C.color}">${C.sym}</span> ${C.label}</td><td>${counts.w[c] || 0}</td><td>${counts.b[c] || 0}</td></tr>`
   }
+  const mm = { w: 0, b: 0 }
+  S.cls.forEach((r, k) => { if (r?.missedMate) mm[g.plies[k].color]++ })
+  if (mm.w || mm.b) html += `<tr class="cl mmrow"><td><span class="badge sm" style="background:#7a5cc7">♚</span> Mates perdidos</td><td>${mm.w}</td><td>${mm.b}</td></tr>`
   html += '</table><p class="muted sm" style="margin:8px 2px 0;line-height:1.4">Classificação no estilo do chess.com, pela análise do Stockfish e as regras que eles publicam. Pode variar em alguns lances.</p>'
   $('#summary').innerHTML = html
   $('#summary').hidden = false

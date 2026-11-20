@@ -5,6 +5,8 @@
 import { Chess } from 'chess.js'
 
 export const THEMES = [
+  // trilha curada: posições enviadas pelo Matheus (src/custom-drills.json), separadas pelo tamanho do mate
+  { key: 'acheOMate', label: 'Ache o mate', icon: '🎯', goal: null, tip: 'Comece pelos xeques: eles limitam as respostas do adversário.', free: true, fases: [{ label: 'Mate em 1' }, { label: 'Mate em 2' }, { label: 'Mate em 3' }, { label: 'Mate em 4+' }] },
   { key: 'mateIn1', label: 'Mate em 1', icon: '♚', goal: 'Dê xeque-mate em 1 lance.', tip: 'Procure os xeques e veja se o rei tem pra onde fugir.' },
   { key: 'mateIn2', label: 'Mate em 2', icon: '♛', goal: 'Dê xeque-mate em 2 lances.', tip: 'Comece pelos xeques e pelas capturas que tiram as defesas do rei.' },
   { key: 'mateIn3', label: 'Mate em 3', icon: '♜', goal: 'Dê xeque-mate em 3 lances.', tip: 'Lances forçados primeiro: xeques, depois capturas, depois ameaças.' },
@@ -25,9 +27,27 @@ export const FASES = [
 export const UNLOCK = 7 // resolvidos na fase pra liberar a próxima
 
 export function themeMeta(key) { return THEMES.find((t) => t.key === key) }
+export function fasesOf(key) { return themeMeta(key)?.fases || FASES }
+export function isMateTheme(key) { return /^mate|backRank|acheOMate/.test(key) }
+export function goalOf(d) {
+  const t = themeMeta(d.theme)
+  return t.goal || `Dê xeque-mate em ${Math.ceil(d.sol.length / 2)} lance${d.sol.length > 1 ? 's' : ''}.`
+}
+// Junta a trilha curada ao banco do Lichess, separando por tamanho do mate
+export function withCustom(data, custom) {
+  const out = { ...data }
+  const fases = fasesOf('acheOMate').map(() => [])
+  for (const p of custom?.acheOMate || []) fases[Math.min(fases.length, Math.max(1, p.mate)) - 1].push(p)
+  out.acheOMate = fases
+  return out
+}
 
 // Prepara um puzzle do Lichess pra jogar
 export function prepare(raw, theme) {
+  if (raw.start) { // posição curada: já vem com quem joga e a solução
+    const turn = raw.start.split(' ')[1]
+    return { id: raw.id, theme, rating: null, start: raw.start, last: raw.last ? { from: raw.last.slice(0, 2), to: raw.last.slice(2, 4), san: raw.lastSan || '' } : null, sol: raw.sol, color: turn, note: raw.note }
+  }
   const ch = new Chess(raw.fen)
   const first = raw.moves[0]
   const m = ch.move({ from: first.slice(0, 2), to: first.slice(2, 4), promotion: first[4] })
@@ -60,11 +80,11 @@ export function faseStats(store, data, theme, f) {
   return { solved, total: list.length }
 }
 export function unlocked(store, data, theme, f) {
-  return f === 0 || faseStats(store, data, theme, f - 1).solved >= UNLOCK
+  return f === 0 || !!themeMeta(theme)?.free || faseStats(store, data, theme, f - 1).solved >= UNLOCK
 }
 export function themeStats(store, data, theme) {
   let solved = 0, total = 0
-  for (let f = 0; f < FASES.length; f++) { const s = faseStats(store, data, theme, f); solved += s.solved; total += s.total }
+  for (let f = 0; f < fasesOf(theme).length; f++) { const s = faseStats(store, data, theme, f); solved += s.solved; total += s.total }
   return { solved, total }
 }
 export function record(store, id, first, now = Date.now()) {

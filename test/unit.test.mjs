@@ -113,6 +113,14 @@ describe('engine (Stockfish) + classificação', () => {
     }
   })
 
+  test('mate forçado perdido fica marcado no lance', { timeout: 120000 }, async () => {
+    const r = await review('1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Nc3 *', 10)
+    const k = r.game.plies.findIndex((p) => p.san === 'Nc3')
+    assert.equal(r.cls[k].missedMate, 1) // tinha Qxf7#
+    assert.equal(r.cls[k].bestUci.slice(0, 4), 'h5f7')
+    assert.ok(!r.cls[k - 1].missedMate)
+  })
+
   test('resumo da partida: erros por categoria (Nf7 deixou mate)', { timeout: 240000 }, async () => {
     const pgn = read('game2.pgn')
     const r = await review(pgn, 10)
@@ -308,21 +316,36 @@ describe('calibração com a review do chess.com (partida do tester)', () => {
 })
 
 describe('treinos (puzzles do Lichess)', () => {
-  const DR = JSON.parse(read('../src/drills.json'))
+  const CUSTOM = JSON.parse(read('../src/custom-drills.json'))
+  const DR = D.withCustom(JSON.parse(read('../src/drills.json')), CUSTOM)
   test('todo puzzle é válido e a solução é legal; mates terminam em mate', () => {
     let n = 0
     for (const t of D.THEMES) {
-      assert.equal(DR[t.key].length, D.FASES.length, t.key)
+      assert.equal(DR[t.key].length, D.fasesOf(t.key).length, t.key)
       for (const fase of DR[t.key]) for (const raw of fase) {
         const d = D.prepare(raw, t.key)
         const ch = new Chess(d.start)
         d.sol.forEach((u, i) => { if (i % 2 === 0) assert.ok(D.check(d, i, ch.fen(), u), raw.id); ch.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }) })
-        if (/^mateIn|backRank/.test(t.key)) assert.ok(ch.isCheckmate(), raw.id)
+        if (D.isMateTheme(t.key)) assert.ok(ch.isCheckmate(), raw.id)
         if (t.key === 'mateIn2') assert.equal(d.sol.length, 3, raw.id)
         n++
       }
     }
-    assert.equal(n, 450)
+    assert.equal(n, 450 + CUSTOM.acheOMate.length)
+  })
+  test('trilha Ache o mate: posições enviadas, separadas pelo tamanho do mate e sem cadeado', () => {
+    assert.ok(CUSTOM.acheOMate.length >= 1)
+    for (const p of CUSTOM.acheOMate) {
+      assert.equal(p.sol.length, 2 * p.mate - 1, p.id)
+      assert.ok(DR.acheOMate[Math.min(4, p.mate) - 1].some((x) => x.id === p.id))
+    }
+    assert.equal(D.unlocked(P.emptyStore(), DR, 'acheOMate', 3), true)
+    const d = D.prepare(DR.acheOMate[2].find((p) => p.id === 'm3-dama-torre'), 'acheOMate')
+    assert.equal(D.goalOf(d), 'Dê xeque-mate em 3 lances.')
+    assert.equal(d.color, 'w'); assert.equal(d.last.san, 'Ke6')
+    // 3º lance: Qg3# também é mate e vale, além do Qf4# da solução
+    const ch = new Chess(d.start); for (const u of d.sol.slice(0, 4)) ch.move({ from: u.slice(0, 2), to: u.slice(2, 4) })
+    assert.equal(D.check(d, 4, ch.fen(), 'd6g3'), true)
   })
   test('confere lance: certo, errado e mate alternativo no último lance', () => {
     const d = D.prepare(DR.mateIn1[0][0], 'mateIn1')

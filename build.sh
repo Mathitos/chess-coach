@@ -29,6 +29,7 @@ cp node_modules/stockfish/bin/stockfish-19-lite-single.js node_modules/stockfish
 cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm dist/
 cp assets/pieces-hera/wK.png dist/favicon.png # ícone do site: rei branco do set Hera
 cp src/drills.json dist/drills.json # treinos (puzzles do Lichess, CC0)
+cp src/custom-drills.json dist/custom-drills.json # trilha Ache o mate (posições enviadas)
 
 # Maia model split in 3 parts (some hosts cap file size); .wasm extension so any static host serves it.
 if [ ! -f dist/maia3.part2.wasm ] || [ assets/maia3_simplified.onnx -nt dist/maia3.part0.wasm ]; then
