@@ -17,6 +17,9 @@ Cola a partida do jeito que o chess.com ou o Lichess compartilham (PGN com ou se
 - mostra o **relógio** de cada jogador em cada momento e o **tempo gasto** em cada lance (a partir do `[%clk]` do PGN);
 - **explorar variantes**: arrasta qualquer peça pra testar lances, com avaliação e classificação do Stockfish;
 - exporta o **PGN anotado** com os comentários.
+- **Lances humanos** (Maia): painel com os lances que jogadores de cada nível jogariam na posição, com seletor de rating e chance de vitória; clique joga o lance como variante;
+- **Treinos**: 9 temas clássicos em 5 fases (puzzles do banco aberto do Lichess, CC0) e a trilha **Ache o mate**, com posições enviadas e conferidas pelo Stockfish (`tools/add-mate.mjs`);
+- **Mates perdidos** marcados no replay (♚), no resumo e nos desafios;
 - **Minhas partidas** (⚙ no canto de cima): busca suas partidas recentes no chess.com ou no Lichess pelas APIs públicas (sem login nesses sites), analisa em lote começando pelas mais recentes, mostra o progresso e deixa cancelar sem perder as que já terminaram. O card **Seus padrões** agrega os tipos de erro mais frequentes (deixou mate, mate que passou, não puniu o adversário, entregou material, tática que passou, abertura, posicional, e quantos foram com pouco tempo);
 - **Desafios**: seus erros e as chances de punir viram desafios com revisão espaçada, salvos no seu Google Drive (pasta oculta do app). No fim de cada desafio aparece de qual partida ele veio, com link pra partida original.
 

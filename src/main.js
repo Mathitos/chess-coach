@@ -1773,6 +1773,65 @@ function trainAction(act) {
   }
 }
 
+// ── Painel "Lances humanos" (Maia): o que jogadores de cada nível jogariam aqui ──
+const HUMAN_ELOS = [600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600]
+const humanCache = new Map()
+let humanTimer = null
+function humanElo(turn) {
+  if (S.humanElo && S.humanElo !== 'auto') return +S.humanElo
+  const e = S.maiaElo?.[turn]
+  return HUMAN_ELOS.includes(e) ? e : 1200
+}
+function renderHuman() {
+  const el = $('#human'); if (!el) return
+  const M = S.mode
+  if (!S.game || S.training || (M && (M.type === 'retry' || M.type === 'puzzle'))) { el.hidden = true; return }
+  el.hidden = false
+  const fen = shownFen()
+  const ch = new Chess(fen)
+  const turn = ch.turn(), elo = humanElo(turn)
+  const sel = `<select id="humanElo" title="Nível dos jogadores"><option value="auto"${!S.humanElo || S.humanElo === 'auto' ? ' selected' : ''}>rating da partida</option>${HUMAN_ELOS.map((e) => `<option value="${e}"${String(S.humanElo) === String(e) ? ' selected' : ''}>${e}</option>`).join('')}</select>`
+  const head = `<div class="hh">🧠 Lances humanos <span class="muted" style="font-weight:400">· ~${elo}</span><span class="grow"></span>${sel}</div>`
+  if (ch.isGameOver()) { el.innerHTML = head + '<p class="muted sm">Fim de jogo.</p>'; return }
+  if (!$('#useMaia').checked && !maiaReady) { el.innerHTML = head + '<p class="muted sm">O Maia é uma rede treinada em partidas humanas: mostra o que jogadores de cada nível jogariam nessa posição. <button class="linkbtn" data-human="load">Ativar (baixa 45 MB na primeira vez)</button></p>'; return }
+  const key = fen + '@' + elo
+  const res = humanCache.get(key)
+  if (!res) {
+    el.innerHTML = head + '<p class="muted sm">Calculando…</p>'
+    clearTimeout(humanTimer)
+    humanTimer = setTimeout(async () => {
+      try {
+        await getMaia(() => {})
+        const [out] = await maiaRun([{ key, fen, elo, eloOppo: elo }])
+        humanCache.set(key, out)
+        if (humanCache.size > 400) humanCache.delete(humanCache.keys().next().value)
+        if (shownFen() === fen) renderHuman()
+      } catch (e) { el.innerHTML = head + `<p class="muted sm">O Maia não carregou: ${esc(e.message)}</p>` }
+    }, 150)
+    return
+  }
+  // melhor lance do Stockfish e lance jogado na partida (se estiver na linha principal)
+  const an = M ? anFor(fen) : S.sf[S.idx]
+  const best = an?.lines?.[0]?.pv?.[0]
+  const next = !M && S.game.plies[S.idx] ? S.game.plies[S.idx].uci : null
+  const top = Object.entries(res.policy).sort((a, b) => b[1] - a[1]).filter(([, p], i) => i < 3 || p >= 0.02).slice(0, 8)
+  const san = (u) => { const c = new Chess(fen); try { return c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }).san } catch { return u } }
+  let html = head
+  for (const [u, pr] of top) {
+    html += `<div class="hrow" data-hmove="${u}" title="Jogar ${esc(san(u))} no tabuleiro"><span class="hm">${esc(san(u))}${u === best ? '<i class="b">melhor</i>' : ''}${next && u.slice(0, 4) === next.slice(0, 4) ? '<i class="j">jogado</i>' : ''}</span><span class="track"><span style="width:${Math.max(2, pr * 100)}%${u === best ? ';background:#81b64c' : ''}"></span></span><span class="pc">${Math.round(pr * 100)}%</span></div>`
+  }
+  const w = Math.round((turn === 'w' ? res.winStm : 1 - res.winStm) * 100)
+  html += `<div class="wdl" title="Chance de vitória estimada pelo Maia pra jogadores ~${elo}"><span class="w" style="width:${Math.max(w, 12)}%">Brancas ${w}%</span><span class="bk" style="width:${Math.max(100 - w, 12)}%">${100 - w}% Pretas</span></div>`
+  html += '<p class="muted sm" style="margin:4px 0 0">Clique num lance pra jogar ele no tabuleiro.</p>'
+  el.innerHTML = html
+}
+function onHumanClick(e) {
+  if (e.target.closest('[data-human=load]')) { getMaia(() => {}).then(renderHuman).catch(() => {}); return renderHuman() }
+  const r = e.target.closest('[data-hmove]'); if (!r) return
+  const u = r.dataset.hmove
+  if (interactiveFen()) userMove(u)
+}
+
 // ── Move list / graph / summary ─────────────────────────────────────────────
 function varRowHtml(v) {
   let html = `<div class="varrow${S.mode === v ? ' on' : ''}"><span class="vmoves">`
@@ -1877,7 +1936,7 @@ function renderSummary() {
 
 function render() {
   if (!S.game) return
-  renderBoard(); renderCoach(); renderMoveList(); renderGraph(); renderGuide()
+  renderBoard(); renderCoach(); renderHuman(); renderMoveList(); renderGraph(); renderGuide()
   $('#counter').textContent = S.mode?.type === 'explore' ? 'variante' : `${S.idx}/${S.game.plies.length}`
 }
 function go(i, internal) {
@@ -1933,6 +1992,8 @@ function init() {
   $('#settings').addEventListener('change', onSettingsInput)
   $('#stats').onclick = onStatsClick
   $('#drillsCard').onclick = onDrillsClick
+  $('#human').onclick = onHumanClick
+  $('#human').onchange = (e) => { if (e.target.id === 'humanElo') { S.humanElo = e.target.value; renderHuman() } }
   for (const b of document.querySelectorAll('.tab')) b.onclick = () => setTab(b.dataset.tab)
   $('#recentPane').onclick = onRecentClick
   document.addEventListener('pointerdown', (e) => { if (!$('#settings').hidden && !e.target.closest('#settings,#gear,#batchBadge,.hint')) toggleSettings(false) })

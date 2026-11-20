@@ -68,6 +68,14 @@ describe('app', () => {
     assert.match(coach, /capivarada/)
     assert.match(coach, /mate em 1/)
     assert.match(coach, /Maia/)
+    // painel Lances humanos: lances mais prováveis, troca de nível e clique joga o lance
+    await page.waitForSelector('#human .hrow', { timeout: 60000 })
+    assert.match(await page.textContent('#human'), /Lances humanos/)
+    assert.match(await page.textContent('#human .wdl'), /Brancas \d+%/)
+    await page.selectOption('#humanElo', '2000')
+    await page.waitForFunction(() => /~2000/.test(document.querySelector('#human').textContent) && document.querySelector('#human .hrow'), null, { timeout: 60000 })
+    await page.click('#human .hrow:not(:has(i.j)) >> nth=0') // um lance diferente do da partida vira variante
+    await page.waitForFunction(() => document.querySelector('#counter').textContent === 'variante', null, { timeout: 10000 })
     assert.deepEqual(errors, [])
   })
 
