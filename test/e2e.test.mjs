@@ -344,7 +344,7 @@ describe('app', () => {
     // trilha Ache o mate: mate em 3 enviado, terminando com outro mate (Qg3#)
     await page.click('[data-act=texit]')
     await page.click('#drillsCard [data-dtheme=acheOMate]')
-    assert.equal(await page.isDisabled('#drillsCard [data-dt=acheOMate][data-dfase="0"]'), true) // mate em 1: vazio por enquanto
+    assert.equal(await page.isDisabled('#drillsCard [data-dt=acheOMate][data-dfase="3"]'), true) // mate em 4+: vazio por enquanto
     await page.click('#drillsCard [data-dt=acheOMate][data-dfase="2"]')
     await page.waitForSelector('text=Ache o mate · Mate em 3')
     assert.match(await page.textContent('#coach'), /O adversário jogou Ke6\. Brancas jogam\. Dê xeque-mate em 3 lances/)
