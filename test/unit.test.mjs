@@ -8,6 +8,8 @@ import { Uci } from '../build/uci.node.mjs'
 import { preprocess, postprocess } from '../build/maia-core.node.mjs'
 import * as P from '../build/puzzles.node.mjs'
 import * as L from '../build/library.node.mjs'
+import * as D from '../build/drills.node.mjs'
+import { Chess } from 'chess.js'
 
 const require = createRequire(import.meta.url)
 const read = (f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')
@@ -302,6 +304,45 @@ describe('calibração com a review do chess.com (partida do tester)', () => {
     assert.notEqual(at(26, 'Nxd6').cls, 'brilliant')
     const nBril = cls.filter((r, k) => r?.cls === 'brilliant' && g.plies[k].color === 'w').length
     assert.ok(nBril >= 1 && nBril <= 2, 'brilhantes ' + nBril) // chess.com: 2
+  })
+})
+
+describe('treinos (puzzles do Lichess)', () => {
+  const DR = JSON.parse(read('../src/drills.json'))
+  test('todo puzzle é válido e a solução é legal; mates terminam em mate', () => {
+    let n = 0
+    for (const t of D.THEMES) {
+      assert.equal(DR[t.key].length, D.FASES.length, t.key)
+      for (const fase of DR[t.key]) for (const raw of fase) {
+        const d = D.prepare(raw, t.key)
+        const ch = new Chess(d.start)
+        d.sol.forEach((u, i) => { if (i % 2 === 0) assert.ok(D.check(d, i, ch.fen(), u), raw.id); ch.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }) })
+        if (/^mateIn|backRank/.test(t.key)) assert.ok(ch.isCheckmate(), raw.id)
+        if (t.key === 'mateIn2') assert.equal(d.sol.length, 3, raw.id)
+        n++
+      }
+    }
+    assert.equal(n, 450)
+  })
+  test('confere lance: certo, errado e mate alternativo no último lance', () => {
+    const d = D.prepare(DR.mateIn1[0][0], 'mateIn1')
+    assert.equal(D.check(d, 0, d.start, d.sol[0]), true)
+    const ch = new Chess(d.start)
+    const other = ch.moves({ verbose: true }).find((m) => m.from + m.to !== d.sol[0].slice(0, 4) && !(() => { const c = new Chess(d.start); c.move(m); return c.isCheckmate() })())
+    assert.equal(D.check(d, 0, d.start, other.from + other.to), false)
+    // qualquer mate vale no último lance
+    for (const m of ch.moves({ verbose: true })) { const c = new Chess(d.start); c.move(m); if (c.isCheckmate()) assert.equal(D.check(d, 0, d.start, m.from + m.to + (m.promotion || '')), true) }
+  })
+  test('fases liberam com 7 resolvidos e o progresso sincroniza', () => {
+    const st = P.emptyStore()
+    assert.equal(D.unlocked(st, DR, 'fork', 0), true)
+    assert.equal(D.unlocked(st, DR, 'fork', 1), false)
+    DR.fork[0].slice(0, 7).forEach((p) => D.record(st, p.id, true))
+    assert.equal(D.unlocked(st, DR, 'fork', 1), true)
+    assert.equal(D.themeStats(st, DR, 'fork').solved, 7)
+    const other = P.emptyStore(); D.record(other, DR.pin[0][0].id, false)
+    const m = P.mergeStores(st, other)
+    assert.equal(Object.keys(m.drills).length, 8)
   })
 })
 

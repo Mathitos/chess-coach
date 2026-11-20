@@ -28,6 +28,7 @@ EOF
 cp node_modules/stockfish/bin/stockfish-19-lite-single.js node_modules/stockfish/bin/stockfish-19-lite-single.wasm dist/
 cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm dist/
 cp assets/pieces-hera/wK.png dist/favicon.png # ícone do site: rei branco do set Hera
+cp src/drills.json dist/drills.json # treinos (puzzles do Lichess, CC0)
 
 # Maia model split in 3 parts (some hosts cap file size); .wasm extension so any static host serves it.
 if [ ! -f dist/maia3.part2.wasm ] || [ assets/maia3_simplified.onnx -nt dist/maia3.part0.wasm ]; then
@@ -37,7 +38,7 @@ if [ ! -f dist/maia3.part2.wasm ] || [ assets/maia3_simplified.onnx -nt dist/mai
 fi
 
 # Node bundles used by the tests
-for f in review uci maia-core puzzles library; do
+for f in review uci maia-core puzzles library drills; do
   npx esbuild src/$f.js --bundle --format=esm --platform=node --outfile=build/$f.node.mjs --log-level=warning
 done
 

@@ -9,7 +9,7 @@ import { chromium } from 'playwright'
 
 const DIST = new URL('../dist/', import.meta.url).pathname
 const read = (f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')
-const MIME = { '.png': 'image/png', '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm' }
+const MIME = { '.json': 'application/json', '.png': 'image/png', '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm' }
 let server, browser, base
 
 before(async () => {
@@ -242,8 +242,8 @@ describe('app', () => {
     })
     await page.click('#gear')
     assert.equal(await page.isVisible('#settings'), true)
-    assert.equal(await page.isDisabled('#sGen'), true) // sem login do Google
-    assert.match(await page.getAttribute('#settings .switch .hint', 'data-tip'), /entrar com o Google/i)
+    assert.equal(await page.isDisabled('#sGen'), false) // sem login também gera (salva no navegador)
+    assert.match(await page.getAttribute('#settings .switch .hint', 'data-tip'), /neste navegador/i)
     assert.match(await page.getAttribute('#settings label.row .hint', 'data-tip'), /por partida/)
     await page.fill('#sUser', 'matheus_anzzulin')
     await page.click('#settings [data-site=chesscom]')
@@ -297,6 +297,42 @@ describe('app', () => {
     assert.match(await page.textContent('#recentPane .rlist li >> nth=0'), /✓/)
     await page.click('.tab[data-tab=paste]')
     assert.equal(await page.isVisible('#pgn'), true)
+    assert.deepEqual(errors, [])
+  })
+
+  test('treinos: temas em fases, mate em 1 e mate em 2 com resposta do adversário', { timeout: 120000 }, async () => {
+    const { page, errors } = await newPage()
+    const DR = JSON.parse(read('../src/drills.json'))
+    await page.waitForSelector('#drillsCard .dtheme')
+    assert.equal(await page.locator('#drillsCard .dtheme').count(), 9)
+    // mate em 1, fase 1 (a fase 2 começa trancada)
+    await page.click('#drillsCard [data-dtheme=mateIn1]')
+    assert.equal(await page.isDisabled('#drillsCard [data-dfase="1"]'), true)
+    await page.click('#drillsCard [data-dfase="0"]')
+    await page.waitForSelector('text=Mate em 1 · Fase 1')
+    const p1 = DR.mateIn1[0][0]
+    const flip1 = await page.evaluate(() => document.querySelector('#coach').textContent.includes('Pretas jogam'))
+    const sol = p1.moves[1]
+    const wrongFrom = sol.slice(0, 2)
+    await page.click('[data-act=thint]')
+    assert.match(await page.textContent('#coach'), new RegExp('Dica: a peça certa está em ' + wrongFrom))
+    await drag(page, sol.slice(0, 2), sol.slice(2, 4), flip1)
+    await page.waitForSelector('#coach .say.good')
+    assert.match(await page.textContent('#coach'), /xeque-mate/)
+    await page.click('[data-act=tnext]')
+    await page.click('[data-act=texit]')
+    assert.match(await page.textContent('#drillsCard [data-dtheme=mateIn1] .dprog'), /^1\//)
+    // mate em 2: lance, resposta automática do adversário, lance final
+    await page.click('#drillsCard [data-dtheme=mateIn2]')
+    await page.click('#drillsCard [data-dfase="0"]')
+    await page.waitForSelector('text=Mate em 2 · Fase 1')
+    const p2 = DR.mateIn2[0][0]
+    const flip2 = await page.evaluate(() => document.querySelector('#coach').textContent.includes('Pretas jogam'))
+    await drag(page, p2.moves[1].slice(0, 2), p2.moves[1].slice(2, 4), flip2)
+    await page.waitForFunction(() => /Continue: ache o próximo lance/.test(document.querySelector('#coach').textContent), null, { timeout: 5000 })
+    await drag(page, p2.moves[3].slice(0, 2), p2.moves[3].slice(2, 4), flip2)
+    await page.waitForSelector('#coach .say.good')
+    assert.match(await page.textContent('#coach'), /xeque-mate/)
     assert.deepEqual(errors, [])
   })
 
@@ -365,14 +401,19 @@ describe('Google Drive (mock do Google)', () => {
       await page.reload()
       assert.equal(await page.isVisible('#loginModal'), false)
       await page.uncheck('#useMaia'); await page.selectOption('#depth', 'fast')
-      // tela inicial deslogada: desafios pedem login
+      // tela inicial deslogada: desafios funcionam no navegador, com convite pro login
       assert.equal(await page.locator('#acct [data-acct=in]').count(), 1)
-      await page.click('#chal [data-home=warn]')
-      assert.match(await page.textContent('#chal'), /Entre com o Google pra ver seus desafios/)
+      assert.match(await page.textContent('#chal'), /Nenhum desafio ainda/)
       // salva desafios ANTES do login (ficam locais)
       await page.fill('#pgn', read('game2.pgn')); await page.click('.chip[data-side=w]')
       await page.click('#go'); await waitDone(page)
       await page.click('[data-act=gsave]')
+      await page.click('#newGame')
+      assert.match(await page.textContent('#chal'), /Últimos desafios/)
+      assert.match(await page.textContent('#localNote'), /Salvos neste navegador/)
+      await page.click('#homeTrain') // treina sem login
+      await page.waitForSelector('text=Desafio 1 de')
+      await page.click('[data-act=texit]')
       // login: adota os desafios locais e sobe pro Drive
       await page.click('#acct [data-acct=in]')
       await page.waitForFunction(() => /salvo no Drive/.test(document.querySelector('#acct').textContent), null, { timeout: 30000 })

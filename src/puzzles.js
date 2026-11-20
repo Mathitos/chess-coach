@@ -11,7 +11,7 @@ export function puzzleId(fen, uci) {
   return 'p' + h.toString(36)
 }
 
-export function emptyStore() { return { v: 1, updatedAt: 0, puzzles: {}, deleted: {}, games: {}, profile: null } }
+export function emptyStore() { return { v: 1, updatedAt: 0, puzzles: {}, deleted: {}, games: {}, profile: null, drills: {} } }
 
 // Union of two stores: newest version of each puzzle wins; deletions win over older edits.
 export function mergeStores(a, b) {
@@ -28,6 +28,9 @@ export function mergeStores(a, b) {
     const cur = out.games[id]
     if (!cur || (g.analyzedAt || 0) > (cur.analyzedAt || 0)) out.games[id] = g
   }
+  // treinos padrão resolvidos: união dos aparelhos
+  out.drills = { ...(a.drills || {}) }
+  for (const [id, r] of Object.entries(b.drills || {})) { const c = out.drills[id]; out.drills[id] = c ? { at: Math.min(c.at || r.at, r.at || c.at), first: !!(c.first || r.first) } : r }
   // configurações do usuário (jogador do chess.com/Lichess etc.): a mais recente vence
   const pa = a.profile, pb = b.profile
   out.profile = pa && pb ? ((pb.updatedAt || 0) > (pa.updatedAt || 0) ? pb : pa) : pa || pb || null

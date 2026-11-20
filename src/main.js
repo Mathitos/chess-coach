@@ -5,6 +5,7 @@ import PIECES from './pieces.gen.js'
 import * as P from './puzzles.js'
 import * as G from './gdrive.js'
 import * as L from './library.js'
+import * as D from './drills.js'
 
 const $ = (s) => document.querySelector(s)
 const store = {
@@ -915,7 +916,7 @@ function onCoachAction(e) {
   const lm = e.target.closest('.lm')
   if (b && ['gstart', 'gauto', 'gskip', 'gnext', 'gprev', 'gstop'].includes(b.dataset.act)) return guideAction(b.dataset.act)
   if (b && b.dataset.act === 'gsave') return savePuzzles()
-  if (b && b.dataset.act?.startsWith('t') && S.training && ['texit', 'tagain', 'tnext', 'thint', 'treveal', 'tdel', 'tline', 'tgame'].includes(b.dataset.act)) return trainAction(b.dataset.act)
+  if (b && S.training && ['texit', 'tagain', 'tnext', 'thint', 'treveal', 'tdel', 'tline', 'tgame', 'dnext'].includes(b.dataset.act)) return trainAction(b.dataset.act)
   if (b && S.mode?.type === 'explore') {
     const act = b.dataset.act, v = S.mode
     if (act === 'xbest') { const u = anFor(v.fens[v.i])?.lines?.[0]?.pv?.[0]; if (u) exploreMove(u); return }
@@ -1119,20 +1120,15 @@ function puzzleWhen(p, now = Date.now()) {
 }
 function renderHome() {
   renderStats()
+  renderDrills()
   if (S.tab === 'recent') renderRecent()
   const el = $('#chal'); if (!el) return
   const head = `<div class="ch-head">${TARGET}<h2>Meus desafios</h2></div>`
-  const needLogin = G.available() && !S.account
-  if (needLogin) {
-    const anon = Object.keys(S.store?.puzzles || {}).length
-    el.innerHTML = head + `<p class="ch-p">Seus erros e as chances que você deixa passar viram desafios pra treinar depois, com revisão espaçada até fixar.</p>` +
-      (S.homeWarn
-        ? `<div class="ch-warn" role="status"><p class="t">Entre com o Google pra ver seus desafios</p><p>Os desafios ficam salvos no seu Google Drive, numa pasta só do app. Assim eles acompanham você em qualquer aparelho.${anon ? ` Os ${anon} desafio${anon > 1 ? 's' : ''} que você já salvou neste navegador vão junto pra sua conta.` : ''}</p><div>${loginBtn()}</div></div>`
-        : `<button class="btn big" data-home="warn">Ver meus desafios</button><p class="ch-note">Pra salvar e sincronizar entre aparelhos, entre com sua conta Google.</p>`)
-    return
-  }
   const st = P.stats(S.store || P.emptyStore())
-  const local = !G.available() ? '<p class="ch-note">Aqui os desafios ficam salvos só neste navegador. Na versão do GitHub Pages dá pra entrar com o Google e sincronizar.</p>' : ''
+  // sem login os desafios ficam no navegador; o login só leva pro Drive
+  const local = !G.available()
+    ? '<p class="ch-note">Aqui os desafios ficam salvos só neste navegador. Na versão do GitHub Pages dá pra entrar com o Google e sincronizar.</p>'
+    : !S.account ? '<p class="ch-note" id="localNote">Salvos neste navegador. <button class="linkbtn" data-acct="in">Entre com o Google</button> pra guardar no seu Drive e usar em outros aparelhos.</p>' : ''
   if (!st.total) {
     el.innerHTML = head + `<div class="ch-empty">${EMPTYBOARD}<p class="t">Nenhum desafio ainda</p><p class="ch-p">Seus desafios vão aparecer aqui conforme você revisar partidas. No fim de cada review, os momentos-chave viram desafios.</p></div>` + local
     return
@@ -1157,8 +1153,7 @@ function onHomeClick(e) {
   const li = e.target.closest('[data-pz]')
   if (li) return startTraining([li.dataset.pz])
   const b = e.target.closest('[data-home]'); if (!b) return
-  if (b.dataset.home === 'warn') { S.homeWarn = true; renderHome() }
-  else if (b.dataset.home === 'train') startTraining()
+  if (b.dataset.home === 'train') startTraining()
   else if (b.dataset.home === 'all') { S.homeAll = !S.homeAll; renderHome() }
 }
 function goHome() {
@@ -1270,7 +1265,7 @@ async function runBatch() {
   const cfg = libSettings()
   const depth = $('#sDepth')?.value || 'deep'
   const opt = DEPTHS[depth]
-  const canGen = !!S.account && cfg.gen
+  const canGen = cfg.gen
   const B = S.batch = { running: true, cancel: false, done: 0, total: 0, skipped: 0, newPuzzles: 0, cur: null, pos: 0, posN: 0, msg: 'Buscando partidas…', depth }
   const alive = () => S.batch === B && !B.cancel
   renderBatchUi()
@@ -1334,7 +1329,7 @@ function renderSettings() {
   const depth = $('#sDepth')?.value || 'deep'
   const per = secPerPos(depth) * AVG_POS
   const logged = !!S.account
-  const genTip = logged ? 'Os seus erros e as chances de punir de cada partida viram desafios, salvos no seu Google Drive.' : G.available() ? 'Precisa entrar com o Google pra gerar desafios: eles ficam salvos no seu Google Drive.' : 'Precisa entrar com o Google pra gerar desafios. Aqui no claude.ai o login do Google não funciona; use a versão do GitHub Pages.'
+  const genTip = logged ? 'Os seus erros e as chances de punir de cada partida viram desafios, salvos no seu Google Drive.' : G.available() ? 'Os seus erros e as chances de punir viram desafios, salvos neste navegador. Entre com o Google pra guardar no Drive e usar em outros aparelhos.' : 'Os seus erros e as chances de punir viram desafios, salvos neste navegador.'
   el.innerHTML = `<h3>Minhas partidas</h3>
     <label class="row">Jogador<input type="text" id="sUser" value="${esc(cfg.user)}" placeholder="seu usuário" ${running ? 'disabled' : ''}></label>
     <div class="row">Site<div class="seg">${Object.entries(L.SITES).map(([k, v]) => `<button class="chip${cfg.site === k ? ' on' : ''}" data-site="${k}" ${running ? 'disabled' : ''}>${v}</button>`).join('')}</div></div>
@@ -1342,7 +1337,7 @@ function renderSettings() {
       <select id="sCount" ${running ? 'disabled' : ''}>${[5, 10, 20, 30, 50].map((n) => `<option${n === +cfg.count ? ' selected' : ''}>${n}</option>`).join('')}</select>
       <span class="est" id="sEst">~${fmtDur(per)} por partida · ~${fmtDur(per * cfg.count)} no total</span></label>
     <label class="row">Profundidade<select id="sDepth" ${running ? 'disabled' : ''}><option value="deep"${depth === 'deep' ? ' selected' : ''}>Profunda (padrão)</option><option value="normal"${depth === 'normal' ? ' selected' : ''}>Normal</option><option value="fast"${depth === 'fast' ? ' selected' : ''}>Rápida</option></select></label>
-    <label class="switch${logged ? '' : ' off'}"><input type="checkbox" id="sGen" ${logged && cfg.gen ? 'checked' : ''} ${logged && !running ? '' : 'disabled'}> Gerar desafios <span class="hint" tabindex="0" data-tip="${esc(genTip)}">?</span></label>
+    <label class="switch"><input type="checkbox" id="sGen" ${cfg.gen ? 'checked' : ''} ${running ? 'disabled' : ''}> Gerar desafios <span class="hint" tabindex="0" data-tip="${esc(genTip)}">?</span></label>
     ${batchProgressHtml()}
     ${running ? '' : `<button class="btn big green" data-lib="run">Analisar partidas</button>`}`
 }
@@ -1497,10 +1492,127 @@ function onRecentClick(e) {
   start()
 }
 
+// ── Treinos padrão (puzzles do Lichess por tema e fase) ─────────────────────
+let DRILLS = null, drillsLoading = null
+function loadDrills() {
+  if (DRILLS) return Promise.resolve(DRILLS)
+  return (drillsLoading ||= fetch('drills.json').then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then((d) => (DRILLS = d)).catch((e) => { drillsLoading = null; throw e }))
+}
+function renderDrills() {
+  const el = $('#drillsCard'); if (!el) return
+  const head = `<div class="ch-head"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#81b64c" stroke-width="2" aria-hidden="true"><path d="M5 21h14M7 21V10l5-6 5 6v11M10 14h4"/></svg><h2>Treinos</h2></div>`
+  if (!DRILLS) {
+    el.innerHTML = head + '<p class="ch-note">Carregando os treinos…</p>'
+    loadDrills().then(renderDrills).catch(() => { el.innerHTML = head + '<p class="ch-note">Não consegui carregar os treinos.</p>' })
+    return
+  }
+  const st = S.store || P.emptyStore()
+  let html = head + '<p class="ch-p">Temas clássicos em fases de dificuldade. Resolva 7 de 10 pra liberar a próxima fase.</p><ul class="dlist">'
+  for (const t of D.THEMES) {
+    const ts = D.themeStats(st, DRILLS, t.key)
+    const open = S.drillOpen === t.key
+    html += `<li class="${open ? 'open' : ''}"><button class="dtheme" data-dtheme="${t.key}" aria-expanded="${open}"><span class="dic">${t.icon}</span><span class="dname"><b>${esc(t.label)}</b><span>${esc(t.goal)}</span></span><span class="dprog">${ts.solved}/${ts.total}</span></button>`
+    if (open) {
+      html += '<div class="dfases">' + D.FASES.map((f, i) => {
+        const fs = D.faseStats(st, DRILLS, t.key, i), un = D.unlocked(st, DRILLS, t.key, i)
+        return `<button class="dfase${fs.solved >= fs.total && fs.total ? ' full' : ''}" data-dfase="${i}" data-dt="${t.key}" ${un ? '' : 'disabled'} title="${un ? `Puzzles de rating ${f.range}` : `Resolva ${D.UNLOCK} da fase anterior pra liberar`}"><b>${un ? '' : '🔒 '}${f.label}</b><span>${fs.solved}/${fs.total}</span><i class="bar2"><span style="width:${fs.total ? Math.round((fs.solved / fs.total) * 100) : 0}%"></span></i></button>`
+      }).join('') + '</div>'
+    }
+    html += '</li>'
+  }
+  html += '</ul><p class="ch-note">Puzzles do banco aberto do Lichess.</p>'
+  el.innerHTML = html
+}
+function onDrillsClick(e) {
+  const f = e.target.closest('[data-dfase]')
+  if (f && !f.disabled) return startDrill(f.dataset.dt, +f.dataset.dfase)
+  const t = e.target.closest('[data-dtheme]')
+  if (t) { S.drillOpen = S.drillOpen === t.dataset.dtheme ? null : t.dataset.dtheme; renderDrills() }
+}
+async function startDrill(theme, f) {
+  await loadDrills()
+  const list = (DRILLS[theme]?.[f] || []).map((r) => D.prepare(r, theme))
+  if (!list.length) return
+  const st = S.store
+  // não resolvidos primeiro, mantendo a ordem de dificuldade
+  const queue = [...list.filter((d) => !st.drills?.[d.id]), ...list.filter((d) => st.drills?.[d.id])]
+  if (!S.training && S.game) S.reviewSnapshot = Object.fromEntries(REVIEW_KEYS.map((k) => [k, S[k]]))
+  stopAuto(); stopTimer()
+  S.training = { kind: 'drill', theme, fase: f, queue, pos: 0, done: 0, ok: 0, solved: 0 }
+  document.body.classList.add('training')
+  show('review')
+  openPuzzle()
+}
+function openDrill() {
+  const T = S.training, d = T.queue[T.pos]
+  if (!d) return finishTraining()
+  Object.assign(S, { game: { headers: { White: 'Brancas', Black: 'Pretas' }, plies: [], positions: [d.start] }, sf: [], threats: [], infos: [], cls: [], maia: [], vars: [], anCache: {}, idx: 0, side: d.color, flip: d.color === 'b', clock: null, guide: false })
+  S.trainMode = { type: 'puzzle', drill: true, d, fen: d.start, step: 0, sel: null, tries: 0, msg: null, ok: null, hint: null, wrong: null, solved: null, busy: false, clean: true, played: null, last: d.last, prevFen: null }
+  S.mode = S.trainMode
+  render()
+}
+function drillWhy(M, ch, mv) {
+  const t = D.themeMeta(M.d.theme)
+  const mate = /^mate|backRank/i.test(M.d.theme)
+  if (mate && !ch.inCheck()) return 'Num mate quase sempre o lance começa com xeque ou tira a última casa de fuga do rei.'
+  if (mate && ch.inCheck()) return 'É xeque, mas o rei ainda escapa. ' + t.tip
+  return t.tip
+}
+function tryDrill(uci) {
+  const M = S.mode, d = M.d
+  const ch = new Chess(M.fen)
+  let mv
+  try { mv = ch.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || 'q' }) } catch { return render() }
+  M.tries++; M.sel = null; M.wrong = null
+  if (!D.check(d, M.step, M.fen, uci)) {
+    Object.assign(M, { clean: false, ok: false, wrong: uci, msg: `${mv.san} não é a resposta. ${drillWhy(M, ch, mv)}${M.tries >= 2 && !M.hint ? ' Quer uma dica?' : ''}` })
+    return render()
+  }
+  if (M.step >= d.sol.length - 1) {
+    Object.assign(M, { ok: true, solved: uci, msg: `Isso! ${mv.san}${ch.isCheckmate() ? ', xeque-mate' : ''}.` })
+    D.record(S.store, d.id, M.clean)
+    S.training.done++; S.training.solved++; if (M.clean) S.training.ok++
+    changed()
+    return render()
+  }
+  // lance certo no meio da sequência: o adversário responde
+  Object.assign(M, { busy: true, pending: uci, ok: true, msg: `Isso! ${mv.san}. O adversário responde…` })
+  render()
+  setTimeout(() => {
+    if (S.mode !== M) return
+    const reply = d.sol[M.step + 1]
+    const rm = ch.move({ from: reply.slice(0, 2), to: reply.slice(2, 4), promotion: reply[4] })
+    Object.assign(M, { fen: ch.fen(), step: M.step + 2, last: { from: rm.from, to: rm.to }, busy: false, pending: null, hint: null, ok: null, msg: `${rm.san}. Continue: ache o próximo lance.` })
+    render()
+  }, 700)
+}
+function renderDrillPanel(box) {
+  const M = S.mode, T = S.training
+  const t = D.themeMeta(T.theme), F = D.FASES[T.fase]
+  if (M.done || !M.d) {
+    const fs = D.faseStats(S.store, DRILLS, T.theme, T.fase)
+    const next = T.fase + 1 < D.FASES.length && D.unlocked(S.store, DRILLS, T.theme, T.fase + 1)
+    box.innerHTML = `<div class="coach-head"><div class="avatar">🏁</div><div><b>${esc(t.label)} · ${F.label} concluída</b><div class="sub">${T.solved} de ${T.queue.length} resolvidos agora · ${T.ok} de primeira · fase: ${fs.solved}/${fs.total}</div></div></div>` +
+      `<p class="say">${next ? `${D.FASES[T.fase + 1].label} liberada! 🎉` : T.fase + 1 < D.FASES.length ? `Resolva ${D.UNLOCK} de ${fs.total} pra liberar a ${D.FASES[T.fase + 1].label}. Faltam ${Math.max(0, D.UNLOCK - fs.solved)}.` : 'Você chegou na última fase desse tema.'}</p>` +
+      `<div class="acts">${next ? '<button class="btn act retry" data-act="dnext">Próxima fase ▶</button>' : ''}<button class="btn act" data-act="tagain">Repetir fase</button><button class="btn act" data-act="texit">Sair do treino</button></div>`
+    return
+  }
+  const d = M.d, side = d.color === 'w' ? 'Brancas' : 'Pretas'
+  let html = `<div class="coach-head"><div class="avatar">${t.icon}</div><div><b>${esc(t.label)} · ${F.label}</b><div class="sub">Puzzle ${T.pos + 1} de ${T.queue.length} · você joga de ${side} · rating ${d.rating}${S.store.drills?.[d.id] ? ' · já resolvido' : ''}</div></div></div>`
+  if (M.msg) html += `<p class="say ${M.ok ? 'good' : M.ok === false ? 'badmsg' : ''}">${linkify(M.msg, [M.fen])}</p>`
+  else html += `<p class="say">${M.step === 0 ? `O adversário jogou ${esc(d.last.san)}. ` : ''}${side} jogam. ${esc(t.goal)}</p>`
+  html += '<div class="acts">'
+  if (!M.solved) {
+    if (!M.hint && !M.busy) html += '<button class="btn act" data-act="thint">💡 Dica</button>'
+    if (!M.busy) html += '<button class="btn act" data-act="treveal">Mostrar resposta</button>'
+  } else html += `<button class="btn act retry" data-act="tnext">${T.pos + 1 < T.queue.length ? 'Próximo puzzle ▶' : 'Ver resultado ▶'}</button>`
+  html += '<button class="btn act" data-act="texit">Sair do treino</button></div>'
+  box.innerHTML = html
+}
+
 // Training session
 const REVIEW_KEYS = ['game', 'sf', 'threats', 'infos', 'cls', 'maia', 'maiaRaw', 'idx', 'side', 'flip', 'clock', 'vars', 'anCache', 'maiaElo', 'guide']
 function startTraining(first) {
-  if (G.available() && !S.account) { S.homeWarn = true; goHome(); return }
   const due = P.dueList(S.store)
   const all = Object.values(S.store.puzzles)
   if (!all.length) { alertBox('Você ainda não tem desafios salvos. Revise uma partida e clique em "💾 Salvar desafios".'); return }
@@ -1516,6 +1628,7 @@ function startTraining(first) {
 function alertBox(msg) { S.syncMsg = msg; renderAcct(); setTimeout(() => { if (S.syncMsg === msg) { S.syncMsg = null; renderAcct() } }, 6000) }
 function openPuzzle() {
   const T = S.training
+  if (T.kind === 'drill') return openDrill()
   const p = S.store.puzzles[T.queue[T.pos]]
   if (!p) return finishTraining()
   const flip = p.color === 'b'
@@ -1540,6 +1653,7 @@ function exitTraining() {
   renderAcct()
 }
 async function tryPuzzle(uci) {
+  if (S.mode.drill) return tryDrill(uci)
   const M = S.mode, p = M.p
   M.busy = true; M.tries++; M.sel = null; M.wrong = null
   const ch = new Chess(M.fen)
@@ -1566,6 +1680,7 @@ async function tryPuzzle(uci) {
 }
 function renderPuzzlePanel(box) {
   const M = S.mode, T = S.training
+  if (T.kind === 'drill') return renderDrillPanel(box)
   if (M.done || !M.p) {
     box.innerHTML = `<div class="coach-head"><div class="avatar">🏁</div><div><b>Treino concluído</b><div class="sub">${T.ok} de ${T.done} de primeira</div></div></div><p class="say">${P.stats(S.store).due ? `Ainda tem ${P.stats(S.store).due} desafio(s) pra revisar.` : 'Nada mais pra revisar agora. Os desafios voltam no dia certo pra fixar.'}</p><div class="acts">${P.stats(S.store).due ? '<button class="btn act retry" data-act="tagain">Continuar treinando</button>' : ''}<button class="btn act" data-act="texit">Sair do treino</button></div>`
     return
@@ -1598,8 +1713,15 @@ function trainAction(act) {
   const M = S.trainMode, T = S.training
   if (act === 'texit') return exitTraining()
   if (act === 'tgame') return openStoredGame(M.p.game.id, M.p)
-  if (act === 'tagain') { S.training = null; return startTraining() }
+  if (act === 'tagain') { const k = T; S.training = null; return k.kind === 'drill' ? startDrill(k.theme, k.fase) : startTraining() }
+  if (act === 'dnext') { const k = T; S.training = null; return startDrill(k.theme, k.fase + 1) }
   if (act === 'tnext') { T.pos++; return T.pos < T.queue.length ? openPuzzle() : finishTraining() }
+  if (act === 'thint' && M.drill) { M.hint = M.d.sol[M.step].slice(0, 2); M.clean = false; M.msg = `Dica: a peça certa está em ${M.hint}.`; M.ok = null; return render() }
+  if (act === 'treveal' && M.drill) {
+    const want = M.d.sol[M.step], sans = D.solutionSan(M.d)
+    Object.assign(M, { solved: want, ok: null, wrong: null, sel: null, msg: `A solução: ${sans.join(' ')}. Tente de novo mais tarde pra contar na fase.` })
+    T.done++; return render()
+  }
   if (act === 'thint') { M.hint = M.p.best.slice(0, 2); M.clean = false; M.msg = `Dica: a peça certa está em ${M.hint}.`; M.ok = null; return render() }
   if (act === 'treveal') {
     Object.assign(M, { solved: M.p.best, ok: null, wrong: null, sel: null, msg: `O lance era ${M.p.bestSan}${M.p.idea ? ': ' + M.p.idea : ''}.` })
@@ -1770,6 +1892,7 @@ function init() {
   $('#settings').addEventListener('input', onSettingsInput)
   $('#settings').addEventListener('change', onSettingsInput)
   $('#stats').onclick = onStatsClick
+  $('#drillsCard').onclick = onDrillsClick
   for (const b of document.querySelectorAll('.tab')) b.onclick = () => setTab(b.dataset.tab)
   $('#recentPane').onclick = onRecentClick
   document.addEventListener('pointerdown', (e) => { if (!$('#settings').hidden && !e.target.closest('#settings,#gear,#batchBadge,.hint')) toggleSettings(false) })
